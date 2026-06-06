@@ -1,0 +1,8 @@
+<resources>
+    <string name="app_name">PocketSQL</string>
+    <string name="splash_tagline">Fast SQL on the go</string>
+    <string name="home_welcome">Welcome to PocketSQL</string>
+    <string name="btn_help">&#8505; Help</string>
+    <string name="pocket">Pocket</string>
+    <string name="sql">SQL</string>
+</resources>

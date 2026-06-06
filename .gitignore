@@ -1,0 +1,39 @@
+*.iml
+.gradle
+/local.properties
+/.idea/
+.DS_Store
+/build
+/captures
+.externalNativeBuild
+.cxx
+local.properties
+
+# Compiled Java class files
+*.class
+
+# Python Caches
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Node.js
+node_modules/
+npm-debug.log*
+
+# OS files
+Thumbs.db
+
+# Android build outputs and keystores
+*.apk
+*.ap_
+*.aab
+*.jks
+*.keystore
+*.p12
+
+# Secrets, Credentials, and API keys
+google-services.json
+secrets.properties
+keystore.properties

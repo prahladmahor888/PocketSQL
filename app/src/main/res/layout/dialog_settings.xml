@@ -1,0 +1,471 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="#1A1A1A"
+    android:orientation="vertical">
+
+    <!-- ── HEADER ──────────────────────────────────────────────────────── -->
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="56dp"
+        android:orientation="horizontal"
+        android:gravity="center_vertical"
+        android:paddingStart="20dp"
+        android:paddingEnd="12dp"
+        android:background="#121212">
+
+        <TextView
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:text="⚙  Settings"
+            android:textColor="#FFFFFF"
+            android:textSize="17sp"
+            android:textStyle="bold"
+            android:fontFamily="sans-serif-medium" />
+
+        <!-- Close / X button -->
+        <TextView
+            android:id="@+id/btnDialogClose"
+            android:layout_width="40dp"
+            android:layout_height="40dp"
+            android:text="✕"
+            android:textColor="#888888"
+            android:textSize="18sp"
+            android:gravity="center"
+            android:clickable="true"
+            android:focusable="true"
+            tools:ignore="TouchTargetSizeCheck"
+            xmlns:tools="http://schemas.android.com/tools"/>
+    </LinearLayout>
+
+    <!-- thin accent line under header -->
+    <View
+        android:layout_width="match_parent"
+        android:layout_height="1dp"
+        android:background="#00E5FF" />
+
+    <!-- ── SCROLLABLE BODY ─────────────────────────────────────────────── -->
+    <ScrollView
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_weight="1"
+        android:scrollbars="none">
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical"
+            android:paddingStart="20dp"
+            android:paddingEnd="20dp"
+            android:paddingTop="16dp"
+            android:paddingBottom="8dp">
+
+            <!-- ── APPEARANCE ──────────────────────────────────────────── -->
+            <TextView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="APPEARANCE"
+                android:textColor="#00E5FF"
+                android:textSize="11sp"
+                android:textStyle="bold"
+                android:fontFamily="sans-serif-medium"
+                android:letterSpacing="0.12"
+                android:layout_marginBottom="10dp" />
+
+            <TextView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="Theme"
+                android:textColor="#CCCCCC"
+                android:textSize="13sp"
+                android:layout_marginBottom="6dp" />
+
+            <RadioGroup
+                android:id="@+id/rgTheme"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="vertical"
+                android:layout_marginBottom="14dp">
+
+                <RadioButton
+                    android:id="@+id/rbThemeClassic"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:text="⬛  Classic  —  Black / White"
+                    android:textColor="#FFFFFF"
+                    android:buttonTint="#00E5FF"
+                    android:textSize="13sp"
+                    android:paddingStart="8dp" />
+
+                <RadioButton
+                    android:id="@+id/rbThemeMatrix"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:text="🟩  Matrix  —  Black / Green"
+                    android:textColor="#00FF41"
+                    android:buttonTint="#00E5FF"
+                    android:textSize="13sp"
+                    android:paddingStart="8dp" />
+
+                <RadioButton
+                    android:id="@+id/rbThemeOcean"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:text="🟦  Ocean  —  Dark Blue / Cyan"
+                    android:textColor="#8ECAE6"
+                    android:buttonTint="#00E5FF"
+                    android:textSize="13sp"
+                    android:paddingStart="8dp" />
+
+                <RadioButton
+                    android:id="@+id/rbThemeDracula"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:text="🟣  Dracula  —  Dark / Violet"
+                    android:textColor="#BD93F9"
+                    android:buttonTint="#00E5FF"
+                    android:textSize="13sp"
+                    android:paddingStart="8dp" />
+            </RadioGroup>
+
+            <View
+                android:layout_width="match_parent"
+                android:layout_height="1dp"
+                android:background="#2E2E2E"
+                android:layout_marginBottom="14dp" />
+
+            <!-- ── FONT ────────────────────────────────────────────────── -->
+            <TextView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="FONT"
+                android:textColor="#00E5FF"
+                android:textSize="11sp"
+                android:textStyle="bold"
+                android:fontFamily="sans-serif-medium"
+                android:letterSpacing="0.12"
+                android:layout_marginBottom="10dp" />
+
+            <TextView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="Font Size"
+                android:textColor="#CCCCCC"
+                android:textSize="13sp"
+                android:layout_marginBottom="6dp" />
+
+            <RadioGroup
+                android:id="@+id/rgFontSize"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="vertical"
+                android:layout_marginBottom="14dp">
+
+                <RadioButton
+                    android:id="@+id/rbFont12"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:text="Small — 12 sp"
+                    android:textColor="#FFFFFF"
+                    android:buttonTint="#00E5FF"
+                    android:textSize="12sp"
+                    android:fontFamily="monospace"
+                    android:paddingStart="8dp" />
+
+                <RadioButton
+                    android:id="@+id/rbFont14"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:text="Medium — 14 sp"
+                    android:textColor="#FFFFFF"
+                    android:buttonTint="#00E5FF"
+                    android:textSize="14sp"
+                    android:fontFamily="monospace"
+                    android:paddingStart="8dp" />
+
+                <RadioButton
+                    android:id="@+id/rbFont16"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:text="Large — 16 sp"
+                    android:textColor="#FFFFFF"
+                    android:buttonTint="#00E5FF"
+                    android:textSize="16sp"
+                    android:fontFamily="monospace"
+                    android:paddingStart="8dp" />
+
+                <RadioButton
+                    android:id="@+id/rbFont18"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:text="X-Large — 18 sp"
+                    android:textColor="#FFFFFF"
+                    android:buttonTint="#00E5FF"
+                    android:textSize="18sp"
+                    android:fontFamily="monospace"
+                    android:paddingStart="8dp" />
+            </RadioGroup>
+
+            <TextView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="Line Spacing"
+                android:textColor="#CCCCCC"
+                android:textSize="13sp"
+                android:layout_marginBottom="6dp" />
+
+            <RadioGroup
+                android:id="@+id/rgLineSpacing"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="vertical"
+                android:layout_marginBottom="14dp">
+
+                <RadioButton
+                    android:id="@+id/rbSpacingCompact"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:text="Compact"
+                    android:textColor="#FFFFFF"
+                    android:buttonTint="#00E5FF"
+                    android:textSize="13sp"
+                    android:paddingStart="8dp" />
+
+                <RadioButton
+                    android:id="@+id/rbSpacingNormal"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:text="Normal"
+                    android:textColor="#FFFFFF"
+                    android:buttonTint="#00E5FF"
+                    android:textSize="13sp"
+                    android:paddingStart="8dp" />
+
+                <RadioButton
+                    android:id="@+id/rbSpacingRelaxed"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:text="Relaxed"
+                    android:textColor="#FFFFFF"
+                    android:buttonTint="#00E5FF"
+                    android:textSize="13sp"
+                    android:paddingStart="8dp" />
+            </RadioGroup>
+
+            <View
+                android:layout_width="match_parent"
+                android:layout_height="1dp"
+                android:background="#2E2E2E"
+                android:layout_marginBottom="14dp" />
+
+            <!-- ── TERMINAL ────────────────────────────────────────────── -->
+            <TextView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="TERMINAL"
+                android:textColor="#00E5FF"
+                android:textSize="11sp"
+                android:textStyle="bold"
+                android:fontFamily="sans-serif-medium"
+                android:letterSpacing="0.12"
+                android:layout_marginBottom="10dp" />
+
+            <TextView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="Prompt Style"
+                android:textColor="#CCCCCC"
+                android:textSize="13sp"
+                android:layout_marginBottom="6dp" />
+
+            <RadioGroup
+                android:id="@+id/rgPrompt"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="vertical"
+                android:layout_marginBottom="14dp">
+
+                <RadioButton
+                    android:id="@+id/rbPromptMysql"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:text="mysql> "
+                    android:textColor="#FFFFFF"
+                    android:buttonTint="#00E5FF"
+                    android:textSize="14sp"
+                    android:fontFamily="monospace"
+                    android:paddingStart="8dp" />
+
+                <RadioButton
+                    android:id="@+id/rbPromptPocket"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:text="pocketsql> "
+                    android:textColor="#FFFFFF"
+                    android:buttonTint="#00E5FF"
+                    android:textSize="14sp"
+                    android:fontFamily="monospace"
+                    android:paddingStart="8dp" />
+
+                <RadioButton
+                    android:id="@+id/rbPromptDollar"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:text="$ "
+                    android:textColor="#FFFFFF"
+                    android:buttonTint="#00E5FF"
+                    android:textSize="14sp"
+                    android:fontFamily="monospace"
+                    android:paddingStart="8dp" />
+
+                <RadioButton
+                    android:id="@+id/rbPromptAngle"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:text="&gt; "
+                    android:textColor="#FFFFFF"
+                    android:buttonTint="#00E5FF"
+                    android:textSize="14sp"
+                    android:fontFamily="monospace"
+                    android:paddingStart="8dp" />
+            </RadioGroup>
+
+            <!-- Auto-scroll row -->
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="horizontal"
+                android:gravity="center_vertical"
+                android:layout_marginBottom="8dp">
+
+                <LinearLayout
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:orientation="vertical">
+
+                    <TextView
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:text="Auto-scroll on Output"
+                        android:textColor="#CCCCCC"
+                        android:textSize="13sp" />
+
+                    <TextView
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:text="Scroll to bottom after each query"
+                        android:textColor="#555555"
+                        android:textSize="11sp" />
+                </LinearLayout>
+
+                <androidx.appcompat.widget.SwitchCompat
+                    android:id="@+id/switchAutoScroll"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content" />
+            </LinearLayout>
+
+            <!-- ── DATABASE UTILITIES ─────────────────────────────────── -->
+            <TextView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="DATABASE UTILITIES"
+                android:textColor="#00E5FF"
+                android:textSize="11sp"
+                android:textStyle="bold"
+                android:fontFamily="sans-serif-medium"
+                android:letterSpacing="0.12"
+                android:layout_marginTop="20dp"
+                android:layout_marginBottom="10dp" />
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="horizontal"
+                android:layout_marginBottom="14dp">
+
+                <TextView
+                    android:id="@+id/btnExportDatabase"
+                    android:layout_width="0dp"
+                    android:layout_height="40dp"
+                    android:layout_weight="1"
+                    android:text="Export Active DB"
+                    android:textColor="#FFFFFF"
+                    android:background="#2E2E2E"
+                    android:gravity="center"
+                    android:clickable="true"
+                    android:focusable="true"
+                    android:layout_marginEnd="8dp"
+                    android:textSize="13sp"
+                    android:fontFamily="sans-serif-medium"/>
+
+                <TextView
+                    android:id="@+id/btnImportDatabase"
+                    android:layout_width="0dp"
+                    android:layout_height="40dp"
+                    android:layout_weight="1"
+                    android:text="Import DB"
+                    android:textColor="#FFFFFF"
+                    android:background="#2E2E2E"
+                    android:gravity="center"
+                    android:clickable="true"
+                    android:focusable="true"
+                    android:textSize="13sp"
+                    android:fontFamily="sans-serif-medium"/>
+            </LinearLayout>
+
+        </LinearLayout>
+    </ScrollView>
+
+    <!-- ── FOOTER: Action Buttons ─────────────────────────────────────── -->
+    <View
+        android:layout_width="match_parent"
+        android:layout_height="1dp"
+        android:background="#2E2E2E" />
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="56dp"
+        android:orientation="horizontal"
+        android:background="#121212">
+
+        <!-- Cancel button -->
+        <TextView
+            android:id="@+id/btnDialogCancel"
+            android:layout_width="0dp"
+            android:layout_height="match_parent"
+            android:layout_weight="1"
+            android:text="Cancel"
+            android:textColor="#888888"
+            android:textSize="15sp"
+            android:fontFamily="sans-serif-medium"
+            android:gravity="center"
+            android:clickable="true"
+            android:focusable="true" />
+
+        <!-- Vertical divider -->
+        <View
+            android:layout_width="1dp"
+            android:layout_height="match_parent"
+            android:background="#2E2E2E" />
+
+        <!-- Apply button -->
+        <TextView
+            android:id="@+id/btnDialogApply"
+            android:layout_width="0dp"
+            android:layout_height="match_parent"
+            android:layout_weight="1"
+            android:text="Apply"
+            android:textColor="#00E5FF"
+            android:textSize="15sp"
+            android:textStyle="bold"
+            android:fontFamily="sans-serif-medium"
+            android:gravity="center"
+            android:clickable="true"
+            android:focusable="true" />
+
+    </LinearLayout>
+
+</LinearLayout>

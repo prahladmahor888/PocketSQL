@@ -1,0 +1,281 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="#000000"
+    android:orientation="vertical">
+
+    <!-- Terminal: vertical scroll wrapping a horizontal scroll -->
+    <ScrollView
+        android:id="@+id/scrollContainer"
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_weight="1"
+        android:background="#000000"
+        android:fillViewport="true">
+
+        <LinearLayout
+            android:id="@+id/layoutTerminalContainer"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical"
+            android:padding="12dp">
+
+            <!--
+                HorizontalScrollView wraps ONLY the history TextView so that
+                wide table output (e.g. SELECT result with many columns) can be
+                scrolled sideways without text wrapping / overriding.
+            -->
+            <HorizontalScrollView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:scrollbars="horizontal"
+                android:fillViewport="false">
+
+                <TextView
+                    android:id="@+id/tvTerminalHistory"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:fontFamily="@font/jetbrains_mono"
+                    android:letterSpacing="0.0"
+                    android:scrollHorizontally="true"
+                    android:lineSpacingExtra="4dp"
+                    android:textColor="#FFFFFF"
+                    android:textSize="14sp" />
+            </HorizontalScrollView>
+
+            <!-- Command Input Line – always full width, no horizontal scroll -->
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:gravity="center_vertical"
+                android:orientation="horizontal"
+                android:layout_marginTop="4dp">
+
+                <TextView
+                    android:id="@+id/tvTerminalPrompt"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:fontFamily="@font/jetbrains_mono"
+                    android:letterSpacing="0.0"
+                    android:text="mysql> "
+                    android:textColor="#FFFFFF"
+                    android:textSize="14sp"
+                    android:textStyle="bold" />
+
+                <EditText
+                    android:id="@+id/etCommandInput"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:background="@null"
+                    android:cursorVisible="true"
+                    android:fontFamily="@font/jetbrains_mono"
+                    android:letterSpacing="0.0"
+                    android:imeOptions="actionSend"
+                    android:inputType="textVisiblePassword|textNoSuggestions"
+                    android:singleLine="true"
+                    android:paddingHorizontal="6dp"
+                    android:textColor="#FFFFFF"
+                    android:textCursorDrawable="@null"
+                    android:textSize="14sp"
+                    tools:ignore="SpeakableTextPresentCheck,TouchTargetSizeCheck" />
+            </LinearLayout>
+        </LinearLayout>
+    </ScrollView>
+
+    <!-- Suggestions Toolbar – dynamically populated and shown/hidden -->
+    <HorizontalScrollView
+        android:id="@+id/suggestionsBar"
+        android:layout_width="match_parent"
+        android:layout_height="42dp"
+        android:background="#151515"
+        android:visibility="gone"
+        android:fillViewport="false"
+        android:scrollbars="none">
+
+        <LinearLayout
+            android:id="@+id/suggestionsContainer"
+            android:layout_width="wrap_content"
+            android:layout_height="match_parent"
+            android:gravity="center_vertical"
+            android:orientation="horizontal"
+            android:paddingStart="8dp"
+            android:paddingEnd="8dp" />
+    </HorizontalScrollView>
+
+    <!-- Action Toolbar: wrapped in HorizontalScrollView so all buttons are reachable -->
+    <HorizontalScrollView
+        android:layout_width="match_parent"
+        android:layout_height="38dp"
+        android:background="#0A0A0A"
+        android:scrollbars="none"
+        android:fillViewport="false">
+
+        <LinearLayout
+            android:id="@+id/actionToolbar"
+            android:layout_width="wrap_content"
+            android:layout_height="match_parent"
+            android:orientation="horizontal"
+            android:gravity="center_vertical"
+            android:paddingStart="6dp"
+            android:paddingEnd="6dp">
+
+            <!-- History Up -->
+            <TextView
+                android:id="@+id/btnHistoryUp"
+                android:layout_width="wrap_content"
+                android:layout_height="match_parent"
+                android:text="▲"
+                android:textColor="#00E5FF"
+                android:textSize="16sp"
+                android:fontFamily="sans-serif-medium"
+                android:gravity="center"
+                android:paddingStart="10dp"
+                android:paddingEnd="10dp"
+                tools:ignore="TouchTargetSizeCheck" />
+
+            <!-- History Down -->
+            <TextView
+                android:id="@+id/btnHistoryDown"
+                android:layout_width="wrap_content"
+                android:layout_height="match_parent"
+                android:text="▼"
+                android:textColor="#00E5FF"
+                android:textSize="16sp"
+                android:fontFamily="sans-serif-medium"
+                android:gravity="center"
+                android:paddingStart="10dp"
+                android:paddingEnd="10dp"
+                tools:ignore="TouchTargetSizeCheck" />
+
+            <!-- Divider -->
+            <View
+                android:layout_width="1dp"
+                android:layout_height="20dp"
+                android:background="#333333"
+                android:layout_marginStart="4dp"
+                android:layout_marginEnd="4dp" />
+
+            <!-- Template -->
+            <TextView
+                android:id="@+id/btnTemplate"
+                android:layout_width="wrap_content"
+                android:layout_height="match_parent"
+                android:text="⊞ Template"
+                android:textColor="#AAAAAA"
+                android:textSize="12sp"
+                android:fontFamily="sans-serif-medium"
+                android:gravity="center"
+                android:paddingStart="10dp"
+                android:paddingEnd="10dp"
+                tools:ignore="TouchTargetSizeCheck" />
+
+            <!-- Clear Line -->
+            <TextView
+                android:id="@+id/btnClearLine"
+                android:layout_width="wrap_content"
+                android:layout_height="match_parent"
+                android:text="⌫ Line"
+                android:textColor="#AAAAAA"
+                android:textSize="12sp"
+                android:fontFamily="sans-serif-medium"
+                android:gravity="center"
+                android:paddingStart="10dp"
+                android:paddingEnd="10dp"
+                tools:ignore="TouchTargetSizeCheck" />
+
+            <!-- Clear Screen -->
+            <TextView
+                android:id="@+id/btnClearScreen"
+                android:layout_width="wrap_content"
+                android:layout_height="match_parent"
+                android:text="✕ Clear"
+                android:textColor="#AAAAAA"
+                android:textSize="12sp"
+                android:fontFamily="sans-serif-medium"
+                android:gravity="center"
+                android:paddingStart="10dp"
+                android:paddingEnd="10dp"
+                tools:ignore="TouchTargetSizeCheck" />
+
+            <!-- Copy All -->
+            <TextView
+                android:id="@+id/btnCopyAll"
+                android:layout_width="wrap_content"
+                android:layout_height="match_parent"
+                android:text="📋 Copy"
+                android:textColor="#AAAAAA"
+                android:textSize="12sp"
+                android:fontFamily="sans-serif-medium"
+                android:gravity="center"
+                android:paddingStart="10dp"
+                android:paddingEnd="10dp"
+                tools:ignore="TouchTargetSizeCheck" />
+
+            <!-- API Keys -->
+            <TextView
+                android:id="@+id/btnApiKeys"
+                android:layout_width="wrap_content"
+                android:layout_height="match_parent"
+                android:text="🔑 API Keys"
+                android:textColor="#AAAAAA"
+                android:textSize="12sp"
+                android:fontFamily="sans-serif-medium"
+                android:gravity="center"
+                android:paddingStart="10dp"
+                android:paddingEnd="10dp"
+                tools:ignore="TouchTargetSizeCheck" />
+
+            <!-- Settings -->
+            <TextView
+                android:id="@+id/btnSettings"
+                android:layout_width="wrap_content"
+                android:layout_height="match_parent"
+                android:text="⚙ Settings"
+                android:textColor="#AAAAAA"
+                android:textSize="12sp"
+                android:fontFamily="sans-serif-medium"
+                android:gravity="center"
+                android:paddingStart="10dp"
+                android:paddingEnd="10dp"
+                tools:ignore="TouchTargetSizeCheck" />
+
+            <!-- Help -->
+            <TextView
+                android:id="@+id/btnHelp"
+                android:layout_width="wrap_content"
+                android:layout_height="match_parent"
+                android:text="@string/btn_help"
+                android:textColor="#AAAAAA"
+                android:textSize="12sp"
+                android:fontFamily="sans-serif-medium"
+                android:gravity="center"
+                android:paddingStart="10dp"
+                android:paddingEnd="10dp"
+                tools:ignore="TouchTargetSizeCheck" />
+
+        </LinearLayout>
+    </HorizontalScrollView>
+
+    <!-- Special Keys Toolbar – pinned just above keyboard -->
+    <HorizontalScrollView
+        android:id="@+id/specialKeysBar"
+        android:layout_width="match_parent"
+        android:layout_height="40dp"
+        android:background="#111111"
+        android:fillViewport="false"
+        android:scrollbars="none"
+        tools:ignore="SpeakableTextPresentCheck">
+
+        <LinearLayout
+            android:id="@+id/specialKeysContainer"
+            android:layout_width="wrap_content"
+            android:layout_height="match_parent"
+            android:gravity="center_vertical"
+            android:orientation="horizontal"
+            android:paddingStart="4dp"
+            android:paddingEnd="4dp" />
+    </HorizontalScrollView>
+
+</LinearLayout>

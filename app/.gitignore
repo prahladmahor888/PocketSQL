@@ -1,0 +1,13 @@
+/build
+*.iml
+*.apk
+*.ap_
+*.aab
+*.jks
+*.keystore
+*.p12
+
+google-services.json
+secrets.properties
+keystore.properties
+*.class
