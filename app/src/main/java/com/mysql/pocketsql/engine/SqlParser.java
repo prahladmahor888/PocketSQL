@@ -995,8 +995,18 @@ public class SqlParser {
         if (matchKeyword("DATABASES")) {
             return new Command.ShowDatabases();
         } else if (matchKeyword("TABLES")) {
+            String databaseName = null;
+            if (matchKeyword("FROM") || matchKeyword("IN")) {
+                SqlToken dbTok = peek();
+                if (dbTok.type == SqlToken.Type.IDENTIFIER || dbTok.type == SqlToken.Type.KEYWORD) {
+                    databaseName = dbTok.value;
+                    consume();
+                } else {
+                    throw new SqlSyntaxException("Expected database name after SHOW TABLES FROM/IN", dbTok.position);
+                }
+            }
             Clause.Where where = parseOptionalWhere();
-            return new Command.ShowTables(full, where);
+            return new Command.ShowTables(full, databaseName, where);
         } else if (matchName("COLUMNS") || matchName("FIELDS")) {
             if (!matchKeyword("FROM") && !matchKeyword("IN")) {
                 throw new SqlSyntaxException("Expected 'FROM' or 'IN' after 'SHOW COLUMNS'", peek().position);

@@ -40,7 +40,13 @@ public class SqlApiKeyManager {
                     sb.append(line).append("\n");
                 }
             }
-            cachedKeys = new JSONObject(sb.toString());
+            String content = sb.toString();
+            try {
+                content = SecurityHelper.decrypt(content);
+            } catch (Exception e) {
+                // Fallback for legacy plaintext key file
+            }
+            cachedKeys = new JSONObject(content);
         } catch (Exception e) {
             e.printStackTrace();
             cachedKeys = new JSONObject();
@@ -52,10 +58,16 @@ public class SqlApiKeyManager {
             if (!baseDir.exists()) {
                 baseDir.mkdirs();
             }
+            String content = cachedKeys.toString(2);
+            try {
+                content = SecurityHelper.encrypt(content);
+            } catch (Exception e) {
+                // Fallback
+            }
             try (FileOutputStream fos = new FileOutputStream(keysFile);
                  OutputStreamWriter osw = new OutputStreamWriter(fos, StandardCharsets.UTF_8);
                  BufferedWriter writer = new BufferedWriter(osw)) {
-                writer.write(cachedKeys.toString(2));
+                writer.write(content);
             }
         } catch (Exception e) {
             e.printStackTrace();

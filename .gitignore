@@ -37,3 +37,7 @@ Thumbs.db
 google-services.json
 secrets.properties
 keystore.properties
+pocketsqlkey
+**/pocketsqlkey
+app/release/
+/app/release/

@@ -45,9 +45,13 @@ public class DatabaseEngine {
     // User-defined variables (e.g., @order_no)
     final Map<String, Object> userVariables = new HashMap<>();
 
+    public long statementCount = 0L;
+    public long totalExecutionTimeMs = 0L;
+
     final SqlPrivilegeManager privilegeManager;
     final SqlTransactionManager transactionManager;
     final SqlDatabaseManager databaseManager;
+    public final SqlSystemDatabaseManager systemDbManager;
 
     public DatabaseEngine(File baseDir) {
         this.storageEngine = new StorageEngine(baseDir);
@@ -56,10 +60,97 @@ public class DatabaseEngine {
         this.privilegeManager = new SqlPrivilegeManager(this);
         this.transactionManager = new SqlTransactionManager(this);
         this.databaseManager = new SqlDatabaseManager(this);
+        this.systemDbManager = new SqlSystemDatabaseManager();
         loadUsers();
+        initializeSystemSchemas();
     }
 
-    public void setCurrentUser(String username, String host) {
+    private void initializeSystemSchemas() {
+        try {
+            String[] systemDbs = {"information_schema", "pocketsql", "sys"};
+            for (String db : systemDbs) {
+                storageEngine.createDatabaseDir(db);
+                JSONObject schemaJson = new JSONObject();
+                List<String> tables = systemDbManager.getSystemTables(db);
+                for (String tbl : tables) {
+                    try {
+                        TableData td = systemDbManager.getSystemTable(this, db, tbl);
+                        JSONObject tableSchema = new JSONObject();
+                        tableSchema.put("columns", new JSONArray(td.columns));
+                        tableSchema.put("types", new JSONArray(td.types));
+                        
+                        JSONObject defaultsObj = new JSONObject();
+                        JSONObject onUpdateObj = new JSONObject();
+                        JSONObject nullablesObj = new JSONObject();
+                        JSONObject keysObj = new JSONObject();
+                        JSONObject extrasObj = new JSONObject();
+                        
+                        for (String col : td.columns) {
+                            defaultsObj.put(col, JSONObject.NULL);
+                            onUpdateObj.put(col, JSONObject.NULL);
+                            nullablesObj.put(col, true);
+                            
+                            if ("user".equalsIgnoreCase(tbl) && ("host".equalsIgnoreCase(col) || "user".equalsIgnoreCase(col))) {
+                                keysObj.put(col, "PRI");
+                            } else if ("db".equalsIgnoreCase(tbl) && ("host".equalsIgnoreCase(col) || "db".equalsIgnoreCase(col) || "user".equalsIgnoreCase(col))) {
+                                keysObj.put(col, "PRI");
+                            } else {
+                                keysObj.put(col, "");
+                            }
+                            
+                            extrasObj.put(col, "");
+                        }
+                        
+                        tableSchema.put("defaults", defaultsObj);
+                        tableSchema.put("on_update", onUpdateObj);
+                        tableSchema.put("nullables", nullablesObj);
+                        tableSchema.put("keys", keysObj);
+                        tableSchema.put("extras", extrasObj);
+                        tableSchema.put("checks", new JSONArray());
+                        tableSchema.put("foreign_keys", new JSONObject());
+                        JSONArray pkArr = new JSONArray();
+                        if ("pocketsql".equalsIgnoreCase(db)) {
+                            if ("user".equalsIgnoreCase(tbl)) {
+                                pkArr.put("Host");
+                                pkArr.put("User");
+                            } else if ("db".equalsIgnoreCase(tbl)) {
+                                pkArr.put("Host");
+                                pkArr.put("Db");
+                                pkArr.put("User");
+                            }
+                        }
+                        tableSchema.put("primary_key", pkArr);
+                        tableSchema.put("uniques", new JSONArray());
+                        
+                        JSONObject indexesObj = new JSONObject();
+                        if (pkArr.length() > 0) {
+                            JSONObject idxMeta = new JSONObject();
+                            idxMeta.put("name", "PRIMARY");
+                            idxMeta.put("columns", pkArr);
+                            idxMeta.put("unique", true);
+                            idxMeta.put("type", "BTREE");
+                            indexesObj.put("PRIMARY", idxMeta);
+                        }
+                        tableSchema.put("indexes", indexesObj);
+                        
+                        if ("sys".equalsIgnoreCase(db) && "version".equalsIgnoreCase(tbl)) {
+                            tableSchema.put("is_view", true);
+                            tableSchema.put("query", "SELECT '8.0.25' AS version, 'PocketSQL' AS source");
+                        } else if ("information_schema".equalsIgnoreCase(db)) {
+                            tableSchema.put("is_view", true);
+                        }
+                        
+                        schemaJson.put(tbl, tableSchema);
+                    } catch (Exception e) {
+                        e.printStackTrace();
+                    }
+                }
+                storageEngine.writeSchema(db, schemaJson);
+            }
+        } catch (Exception e) {
+            e.printStackTrace();
+        }
+    }    public void setCurrentUser(String username, String host) {
         this.currentUser = username;
         this.currentHost = host;
     }
@@ -154,6 +245,9 @@ public class DatabaseEngine {
             
             QueryResult result = command.execute(this);
             long endTime = System.currentTimeMillis();
+            long duration = endTime - startTime;
+            statementCount++;
+            totalExecutionTimeMs += duration;
             
             // Add execution time to result
             return new QueryResult(
@@ -163,7 +257,7 @@ public class DatabaseEngine {
                 result.columnTypes,
                 result.rows,
                 result.affectedRows,
-                endTime - startTime
+                duration
             );
         } catch (SqlSyntaxException e) {
             return QueryResult.createError("Syntax Error: " + e.getMessage());
@@ -529,57 +623,97 @@ public class DatabaseEngine {
     }
 
     public QueryResult showTables() throws Exception {
-        return showTables(false, null);
+        return showTables(null, false, null);
     }
 
     public QueryResult showTables(boolean full, Clause.Where where) throws Exception {
-        verifyPrivilege("SELECT", activeDatabaseName, "*");
-        ensureActiveSchema();
+        return showTables(null, full, where);
+    }
 
-        List<Map<String, Object>> rows = new ArrayList<>();
-        Iterator<String> keys = activeSchemaJson.keys();
-        String colName = "Tables_in_" + activeDatabaseName;
-        String tableTypeColName = "Table_type";
-        
-        List<String> columns = new ArrayList<>();
-        columns.add(colName);
-        List<String> types = new ArrayList<>();
-        types.add("TEXT");
-        
-        if (full) {
-            columns.add(tableTypeColName);
-            types.add("TEXT");
+    public QueryResult showTables(String databaseName, boolean full, Clause.Where where) throws Exception {
+        String dbToUse = databaseName != null ? databaseName : activeDatabaseName;
+        if (dbToUse == null) {
+            throw new Exception("No database selected");
         }
 
-        while (keys.hasNext()) {
-            String key = keys.next();
-            if (!key.startsWith("__")) {
-                JSONObject ts = activeSchemaJson.getJSONObject(key);
-                boolean isView = ts.optBoolean("is_view", false);
-                String tableType = isView ? "VIEW" : "BASE TABLE";
-                
-                Map<String, Object> row = new HashMap<>();
-                row.put(colName, key);
-                row.put(colName.toUpperCase(), key);
-                
+        List<String> columns = new ArrayList<>();
+        List<String> types = new ArrayList<>();
+        String colName = "Tables_in_" + dbToUse;
+        columns.add(colName);
+        types.add("VARCHAR");
+        if (full) {
+            columns.add("Table_type");
+            types.add("VARCHAR");
+        }
+
+        List<Map<String, Object>> rows = new ArrayList<>();
+        List<String> tables = new ArrayList<>();
+
+        if (systemDbManager.isSystemDatabase(dbToUse)) {
+            tables = systemDbManager.getSystemTables(dbToUse);
+        } else {
+            JSONObject schemaJson;
+            if (dbToUse.equalsIgnoreCase(activeDatabaseName) && activeSchemaJson != null) {
+                schemaJson = activeSchemaJson;
+            } else {
+                schemaJson = storageEngine.readSchema(dbToUse);
+            }
+            Iterator<String> keys = schemaJson.keys();
+            while (keys.hasNext()) {
+                String key = keys.next();
+                if (!key.startsWith("__")) {
+                    tables.add(key);
+                }
+            }
+            Collections.sort(tables);
+        }
+
+        for (String table : tables) {
+            Map<String, Object> row = new HashMap<>();
+            row.put(colName, table);
+            row.put(colName.toLowerCase(), table);
+            row.put(colName.toUpperCase(), table);
+            row.put("table_name", table);
+            row.put("TABLE_NAME", table);
+            row.put("Table_name", table);
+            row.put("name", table);
+            row.put("NAME", table);
+            row.put("Name", table);
+
+            if (full) {
+                String type = "BASE TABLE";
+                if (systemDbManager.isSystemDatabase(dbToUse)) {
+                    type = systemDbManager.getTableType(dbToUse, table);
+                } else {
+                    JSONObject schemaJson;
+                    if (dbToUse.equalsIgnoreCase(activeDatabaseName) && activeSchemaJson != null) {
+                        schemaJson = activeSchemaJson;
+                    } else {
+                        schemaJson = storageEngine.readSchema(dbToUse);
+                    }
+                    JSONObject ts = schemaJson.optJSONObject(table);
+                    if (ts != null && ts.optBoolean("is_view", false)) {
+                        type = "VIEW";
+                    }
+                }
+                row.put("Table_type", type);
+                row.put("table_type", type);
+                row.put("TABLE_TYPE", type);
+            }
+
+            if (where == null || where.evaluate(row, null, this)) {
+                Map<String, Object> displayRow = new HashMap<>();
+                displayRow.put(colName, table);
                 if (full) {
-                    row.put(tableTypeColName, tableType);
-                    row.put("TABLE_TYPE", tableType);
+                    displayRow.put("Table_type", row.get("Table_type"));
                 }
-                
-                if (where == null || where.evaluate(row, null, this)) {
-                    rows.add(row);
-                }
+                rows.add(displayRow);
             }
         }
 
-        return QueryResult.createSelectSuccess(
-            columns,
-            types,
-            rows,
-            0
-        );
+        return QueryResult.createSelectSuccess(columns, types, rows, 0);
     }
+
 
     public QueryResult createView(String viewName, String selectQuery) throws Exception {
         return createView(viewName, selectQuery, null);
@@ -968,6 +1102,42 @@ public class DatabaseEngine {
         verifyPrivilege("SELECT", activeDatabaseName, tableName);
         ensureActiveSchema();
 
+        String dbToCheck = activeDatabaseName;
+        String tableToCheck = tableName;
+        if (tableName.contains(".")) {
+            int dotIdx = tableName.indexOf('.');
+            dbToCheck = tableName.substring(0, dotIdx).trim();
+            tableToCheck = tableName.substring(dotIdx + 1).trim();
+        }
+
+        if (dbToCheck != null && systemDbManager.isSystemDatabase(dbToCheck)) {
+            TableData td = systemDbManager.getSystemTable(this, dbToCheck.toLowerCase(), tableToCheck.toLowerCase());
+            List<String> columns = new ArrayList<>();
+            columns.add("Field");
+            columns.add("Type");
+            columns.add("Null");
+            columns.add("Key");
+            columns.add("Default");
+            columns.add("Extra");
+            
+            List<String> types = new ArrayList<>();
+            for (int i = 0; i < 6; i++) types.add("TEXT");
+
+            List<Map<String, Object>> rows = new ArrayList<>();
+            for (int i = 0; i < td.columns.size(); i++) {
+                String colName = td.columns.get(i);
+                Map<String, Object> row = new HashMap<>();
+                row.put("Field", colName);
+                row.put("Type", td.types.get(i));
+                row.put("Null", "YES");
+                row.put("Key", "");
+                row.put("Default", null);
+                row.put("Extra", "");
+                rows.add(row);
+            }
+            return QueryResult.createSelectSuccess(columns, types, rows, 0);
+        }
+
         if (!activeSchemaJson.has(tableName)) {
             return QueryResult.createError("Error: Table '" + tableName + "' does not exist");
         }
@@ -1150,9 +1320,31 @@ public class DatabaseEngine {
         return QueryResult.createSelectSuccess(cols, typs, rows, 0);
     }
 
-    // --- Query Operations ---
-
     TableData getOrLoadTable(String tableName) throws Exception {
+        boolean isLegacySystemTable = tableName.contains(".") && 
+            (tableName.equalsIgnoreCase("INFORMATION_SCHEMA.STATISTICS") || 
+             tableName.equalsIgnoreCase("INFORMATION_SCHEMA.VIEWS") || 
+             tableName.equalsIgnoreCase("INFORMATION_SCHEMA.ROUTINES"));
+
+        if (!isLegacySystemTable) {
+            String resolvedDb = activeDatabaseName;
+            String resolvedTable = tableName;
+            if (tableName.contains(".")) {
+                int dotIdx = tableName.indexOf('.');
+                resolvedDb = tableName.substring(0, dotIdx).trim();
+                resolvedTable = tableName.substring(dotIdx + 1).trim();
+            }
+
+            if (resolvedDb != null) {
+                String lowerDb = resolvedDb.toLowerCase();
+                String lowerTable = resolvedTable.toLowerCase();
+
+                if ("information_schema".equals(lowerDb) || "pocketsql".equals(lowerDb) || "sys".equals(lowerDb)) {
+                    return systemDbManager.getSystemTable(this, lowerDb, lowerTable);
+                }
+            }
+        }
+
         ensureActiveSchema();
         tableName = resolveTableName(tableName);
         if ("INFORMATION_SCHEMA.STATISTICS".equalsIgnoreCase(tableName)) {
@@ -5067,4 +5259,5 @@ public class DatabaseEngine {
         
         return QueryResult.createSuccess("Database '" + dbName + "' imported successfully from " + filePath, 0, 0);
     }
+
 }

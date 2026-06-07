@@ -48,7 +48,7 @@ public class SqlEngineTest {
     public void testDatabaseLifecycle() {
         QueryResult r = engine.execute("SHOW DATABASES;");
         assertTrue(r.success);
-        assertEquals(0, r.rows.size());
+        assertEquals(3, r.rows.size());
 
         // Create
         r = engine.execute("CREATE DATABASE my_db;");
@@ -58,8 +58,14 @@ public class SqlEngineTest {
         // Show
         r = engine.execute("SHOW DATABASES;");
         assertTrue(r.success);
-        assertEquals(1, r.rows.size());
-        assertEquals("my_db", r.rows.get(0).get("Database"));
+        assertEquals(4, r.rows.size());
+        boolean foundMyDb = false;
+        for (Map<String, Object> row : r.rows) {
+            if ("my_db".equals(row.get("Database"))) {
+                foundMyDb = true;
+            }
+        }
+        assertTrue("my_db not found in SHOW DATABASES", foundMyDb);
 
         // Use
         r = engine.execute("USE my_db;");
@@ -74,7 +80,7 @@ public class SqlEngineTest {
 
         r = engine.execute("SHOW DATABASES;");
         assertTrue(r.success);
-        assertEquals(0, r.rows.size());
+        assertEquals(3, r.rows.size());
     }
 
     @Test

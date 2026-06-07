@@ -271,20 +271,26 @@ public interface Command {
 
     class ShowTables implements Command {
         public final boolean full;
+        public final String databaseName;
         public final Clause.Where where;
 
         public ShowTables() {
-            this(false, null);
+            this(false, null, null);
         }
 
         public ShowTables(boolean full, Clause.Where where) {
+            this(full, null, where);
+        }
+
+        public ShowTables(boolean full, String databaseName, Clause.Where where) {
             this.full = full;
+            this.databaseName = databaseName;
             this.where = where;
         }
 
         @Override
         public QueryResult execute(DatabaseEngine engine) throws Exception {
-            return engine.showTables(full, where);
+            return engine.showTables(databaseName, full, where);
         }
     }
 

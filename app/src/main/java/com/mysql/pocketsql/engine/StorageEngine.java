@@ -36,10 +36,26 @@ public class StorageEngine {
                 }
             }
         }
+        boolean hasInfoSchema = false;
+        boolean hasPocketSql = false;
+        boolean hasSys = false;
+        for (String db : list) {
+            if ("information_schema".equalsIgnoreCase(db)) hasInfoSchema = true;
+            if ("pocketsql".equalsIgnoreCase(db)) hasPocketSql = true;
+            if ("sys".equalsIgnoreCase(db)) hasSys = true;
+        }
+        if (!hasInfoSchema) list.add("information_schema");
+        if (!hasPocketSql) list.add("pocketsql");
+        if (!hasSys) list.add("sys");
         return list;
     }
 
     public boolean databaseExists(String dbName) {
+        if (dbName != null && (dbName.equalsIgnoreCase("information_schema") ||
+                               dbName.equalsIgnoreCase("pocketsql") ||
+                               dbName.equalsIgnoreCase("sys"))) {
+            return true;
+        }
         File dir = new File(databasesDir, dbName);
         return dir.exists() && dir.isDirectory();
     }
@@ -153,14 +169,25 @@ public class StorageEngine {
                 sb.append(line).append("\n");
             }
         }
-        return sb.toString();
+        String content = sb.toString();
+        try {
+            return SecurityHelper.decrypt(content);
+        } catch (Exception e) {
+            return content;
+        }
     }
 
     private void writeFileContent(File file, String content) throws Exception {
+        String encryptedContent;
+        try {
+            encryptedContent = SecurityHelper.encrypt(content);
+        } catch (Exception e) {
+            encryptedContent = content;
+        }
         try (FileOutputStream fos = new FileOutputStream(file);
              OutputStreamWriter osw = new OutputStreamWriter(fos, StandardCharsets.UTF_8);
              BufferedWriter writer = new BufferedWriter(osw)) {
-            writer.write(content);
+            writer.write(encryptedContent);
         }
     }
 

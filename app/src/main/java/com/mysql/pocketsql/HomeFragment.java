@@ -141,11 +141,8 @@ public class HomeFragment extends Fragment {
         super.onViewCreated(view, savedInstanceState);
 
         // Initialize Database Engine
-        File extFiles = requireContext().getExternalFilesDir(null);
-        if (extFiles == null) {
-            extFiles = requireContext().getFilesDir();
-        }
-        pocketsqlDir = new File(extFiles, "PocketSQL");
+        File filesDir = requireContext().getFilesDir();
+        pocketsqlDir = new File(filesDir, "PocketSQL");
         if (!pocketsqlDir.exists()) {
             pocketsqlDir.mkdirs();
         }
@@ -2082,28 +2079,46 @@ public class HomeFragment extends Fragment {
 
         if (res.success) {
             if (res.columns != null && res.rows != null) {
-                // Fetch query - animate output!
-                // Compute column widths by splitting multiline cell values
-                int[] widths = new int[res.columns.size()];
-                for (int i = 0; i < res.columns.size(); i++) {
-                    widths[i] = res.columns.get(i).length();
-                }
-                for (Map<String, Object> row : res.rows) {
+                // Check for empty result set - show "Empty set" like real MySQL
+                if (res.rows.isEmpty()) {
+                    SpannableStringBuilder sb = new SpannableStringBuilder();
+                    sb.append(promptTxt).append(line).append("\n");
+                    
+                    String timeStr = String.format("%.2f", res.executionTimeMs / 1000.0);
+                    sb.append("Empty set (").append(timeStr).append(" sec)\n\n");
+                    
+                    tvTerminalHistory.append(sb);
+                    etCommandInput.setEnabled(true);
+                    refreshTerminalPrompt();
+                    showKeyboard();
+                    if (settings.isAutoScroll()) {
+                        scrollContainer.post(() -> scrollContainer.fullScroll(View.FOCUS_DOWN));
+                    }
+                    if (onComplete != null) onComplete.run();
+                } else {
+                    // Fetch query - animate output!
+                    // Compute column widths by splitting multiline cell values
+                    int[] widths = new int[res.columns.size()];
                     for (int i = 0; i < res.columns.size(); i++) {
-                        Object val = row.get(res.columns.get(i));
-                        String str = (val == null) ? "NULL" : val.toString().replace("\r", "").replace("\t", "    ");
-                        String[] lines = str.split("\n", -1);
-                        for (String lineStr : lines) {
-                            if (lineStr.length() > widths[i]) {
-                                widths[i] = lineStr.length();
+                        widths[i] = res.columns.get(i).length();
+                    }
+                    for (Map<String, Object> row : res.rows) {
+                        for (int i = 0; i < res.columns.size(); i++) {
+                            Object val = row.get(res.columns.get(i));
+                            String str = (val == null) ? "NULL" : val.toString().replace("\r", "").replace("\t", "    ");
+                            String[] lines = str.split("\n", -1);
+                            for (String lineStr : lines) {
+                                if (lineStr.length() > widths[i]) {
+                                    widths[i] = lineStr.length();
+                                }
                             }
                         }
                     }
+                    String border = buildBorderLine(widths);
+                    double executionTimeSec = res.executionTimeMs / 1000.0;
+                    
+                    animateTableOutput(res.columns, res.rows, widths, border, promptTxt, line, res.rows.size(), executionTimeSec, onComplete);
                 }
-                String border = buildBorderLine(widths);
-                double executionTimeSec = res.executionTimeMs / 1000.0;
-                
-                animateTableOutput(res.columns, res.rows, widths, border, promptTxt, line, res.rows.size(), executionTimeSec, onComplete);
             } else {
                 // DML / DDL Output
                 SpannableStringBuilder sb = new SpannableStringBuilder();
@@ -2227,13 +2242,10 @@ public class HomeFragment extends Fragment {
             }, (long) (i + 1) * delayMs);
         }
 
-        // Handle empty row set
+        // Handle empty row set (safety fallback)
         if (rows.isEmpty()) {
-            StringBuilder footerSb = new StringBuilder(border).append("\n");
             String timeStr = String.format("%.2f", executionTimeSec);
-            footerSb.append("0 rows in set (")
-                    .append(timeStr).append(" sec)\n\n");
-            tvTerminalHistory.append(footerSb.toString());
+            tvTerminalHistory.append("Empty set (" + timeStr + " sec)\n\n");
             
             etCommandInput.setEnabled(true);
             refreshTerminalPrompt();
