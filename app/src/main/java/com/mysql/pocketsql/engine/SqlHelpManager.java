@@ -14,11 +14,11 @@ public class SqlHelpManager {
 
     static {
         // DML
-        HELP_MAP.put("SELECT", "Retrieves data from one or more tables. Usage: SELECT columns FROM table WHERE condition LIMIT count;");
+        HELP_MAP.put("SELECT", "Retrieves data from one or more tables. Supports cross-database queries. Usage: SELECT columns FROM table WHERE condition LIMIT count; Cross-DB: SELECT * FROM db_name.table_name;");
         HELP_MAP.put("INSERT", "Adds new rows of data into a table. Usage: INSERT INTO table (cols) VALUES (vals);");
         HELP_MAP.put("UPDATE", "Modifies existing data in a table. Usage: UPDATE table SET col=val WHERE condition;");
         HELP_MAP.put("DELETE", "Removes rows of data from a table. Usage: DELETE FROM table WHERE condition;");
-        HELP_MAP.put("FROM", "Specifies the source table(s) to retrieve data from in a SELECT statement.");
+        HELP_MAP.put("FROM", "Specifies the source table(s) to retrieve data from in a SELECT statement. Supports db_name.table_name syntax for cross-database queries.");
         HELP_MAP.put("WHERE", "Filters rows returned by a query based on a specified condition.");
         HELP_MAP.put("VALUES", "Specifies values to insert into table columns in an INSERT statement.");
         HELP_MAP.put("INTO", "Specifies target table for INSERT operations.");
@@ -34,21 +34,24 @@ public class SqlHelpManager {
         HELP_MAP.put("ALTER TABLE", "Modifies an existing table's columns or constraints. Usage: ALTER TABLE tbl ADD/DROP/MODIFY column;");
         HELP_MAP.put("TRUNCATE", "Empties all data rows from a table. Usage: TRUNCATE TABLE tblName;");
         HELP_MAP.put("RENAME", "Renames a table or database. Usage: RENAME TABLE old TO new;");
-        HELP_MAP.put("DESCRIBE", "Displays the structure/schema of a table. Usage: DESCRIBE tblName;");
+        HELP_MAP.put("DESCRIBE", "Displays the structure/schema of a table. Supports cross-database syntax. Usage: DESCRIBE tblName; DESCRIBE db_name.tblName;");
         HELP_MAP.put("DESC", "Short alias for DESCRIBE. Displays the structure of a table. Usage: DESC tblName;");
         HELP_MAP.put("USE", "Sets the active database context. Usage: USE dbName;");
         HELP_MAP.put("DELIMITER", "Changes the statement query terminator/delimiter. Usage: DELIMITER //");
         HELP_MAP.put("CONSTRAINT", "Declares a named constraint (primary/foreign/check/unique) in ALTER or CREATE TABLE.");
         HELP_MAP.put("COLUMN", "Specifies column-level actions in ALTER TABLE commands.");
         HELP_MAP.put("INDEX", "Creates or drops an index on table columns. Usage: CREATE INDEX idx ON tbl(col);");
+        HELP_MAP.put("VIEW", "Creates a virtual table based on a SELECT query. Usage: CREATE VIEW view_name AS SELECT ...;");
+        HELP_MAP.put("CROSS-DATABASE QUERY", "Query tables from another database without switching. Usage: SELECT * FROM db_name.table_name; DESCRIBE db_name.table_name;");
 
         // Show
         HELP_MAP.put("SHOW", "Displays metadata (databases, tables, columns, function status, etc.).");
         HELP_MAP.put("SHOW DATABASES", "Lists all existing databases. Usage: SHOW DATABASES;");
-        HELP_MAP.put("SHOW TABLES", "Lists all tables in the active database. Usage: SHOW TABLES;");
-        HELP_MAP.put("SHOW COLUMNS", "Lists column metadata of a table. Usage: SHOW COLUMNS FROM tbl;");
+        HELP_MAP.put("SHOW TABLES", "Lists all tables in the active database. Usage: SHOW TABLES; SHOW TABLES FROM db_name; SHOW TABLES IN db_name;");
+        HELP_MAP.put("SHOW COLUMNS", "Lists column metadata of a table. Usage: SHOW COLUMNS FROM tbl; SHOW COLUMNS FROM tbl FROM db_name;");
         HELP_MAP.put("SHOW CREATE TABLE", "Displays the CREATE TABLE statement used to create a table.");
         HELP_MAP.put("SHOW CREATE DATABASE", "Displays the CREATE DATABASE statement used to create a database.");
+        HELP_MAP.put("SHOW CREATE VIEW", "Displays the CREATE VIEW statement used to create a view.");
 
         // Join
         HELP_MAP.put("JOIN", "Combines rows from two or more tables based on a related column between them.");

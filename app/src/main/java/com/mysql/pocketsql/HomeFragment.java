@@ -2378,6 +2378,7 @@ public class HomeFragment extends Fragment {
         basic.add(new TemplateItem("Select All Rows", "SELECT * FROM <table>;"));
         basic.add(new TemplateItem("Select with Filter", "SELECT <col> FROM <table> WHERE <col> = '<val>';"));
         basic.add(new TemplateItem("Select Distinct values", "SELECT DISTINCT <col> FROM <table>;"));
+        basic.add(new TemplateItem("Select from Another Database", "SELECT * FROM <db_name>.<table>;"));
         basic.add(new TemplateItem("Insert New Row", "INSERT INTO <table> (<col1>, <col2>) VALUES ('<v1>', '<v2>');"));
         basic.add(new TemplateItem("Update Row Values", "UPDATE <table> SET <col> = '<val>' WHERE <col> = '<val>';"));
         basic.add(new TemplateItem("Delete Rows", "DELETE FROM <table> WHERE <col> = '<val>';"));
@@ -2432,7 +2433,10 @@ public class HomeFragment extends Fragment {
         admin.add(new TemplateItem("Use Database", "USE <db_name>;"));
         admin.add(new TemplateItem("Show Databases list", "SHOW DATABASES;"));
         admin.add(new TemplateItem("Show Tables list", "SHOW TABLES;"));
+        admin.add(new TemplateItem("Show Tables from Database", "SHOW TABLES FROM <db_name>;"));
         admin.add(new TemplateItem("Describe Table schema", "DESCRIBE <table>;"));
+        admin.add(new TemplateItem("Describe from Another Database", "DESCRIBE <db_name>.<table>;"));
+        admin.add(new TemplateItem("Create View", "CREATE VIEW <view_name> AS SELECT <col> FROM <table>;"));
         admin.add(new TemplateItem("Interactive Help Index", "HELP;"));
         admin.add(new TemplateItem("Help for Keyword", "HELP <keyword>;"));
         admin.add(new TemplateItem("Drop Table", "DROP TABLE <table>;"));

@@ -1342,6 +1342,74 @@ public class DatabaseEngine {
                 if ("information_schema".equals(lowerDb) || "pocketsql".equals(lowerDb) || "sys".equals(lowerDb)) {
                     return systemDbManager.getSystemTable(this, lowerDb, lowerTable);
                 }
+
+                // Cross-database query for user databases (e.g., SELECT * FROM school.students)
+                if (tableName.contains(".")) {
+                    String targetDb = resolveDatabaseName(resolvedDb);
+                    if (targetDb == null || !storageEngine.databaseExists(targetDb)) {
+                        throw new Exception("Unknown database '" + resolvedDb + "'");
+                    }
+                    JSONObject targetSchema = storageEngine.readSchema(targetDb);
+                    // Case-insensitive table name resolution in target database
+                    String actualTableName = null;
+                    Iterator<String> keys = targetSchema.keys();
+                    while (keys.hasNext()) {
+                        String key = keys.next();
+                        if (key.equalsIgnoreCase(resolvedTable)) {
+                            actualTableName = key;
+                            break;
+                        }
+                    }
+                    if (actualTableName == null) {
+                        throw new Exception("Table '" + targetDb + "." + resolvedTable + "' doesn't exist");
+                    }
+
+                    JSONObject ts = targetSchema.getJSONObject(actualTableName);
+
+                    // Handle views in the target database
+                    if (ts.optBoolean("is_view", false)) {
+                        String savedDb = activeDatabaseName;
+                        JSONObject savedSchema = activeSchemaJson;
+                        try {
+                            activeDatabaseName = targetDb;
+                            activeSchemaJson = targetSchema;
+                            String viewQuery = ts.getString("query");
+                            QueryResult result = execute(viewQuery);
+                            if (!result.success) {
+                                throw new Exception("Error evaluating view '" + actualTableName + "': " + result.message);
+                            }
+                            List<String> cols = new ArrayList<>();
+                            for (String col : result.columns) {
+                                cols.add(getDisplayColumnName(col));
+                            }
+                            TableData td = new TableData(actualTableName, cols, result.columnTypes);
+                            for (Map<String, Object> r : result.rows) {
+                                Map<String, Object> rowCopy = new HashMap<>();
+                                for (int i = 0; i < cols.size(); i++) {
+                                    rowCopy.put(cols.get(i), r.get(result.columns.get(i)));
+                                }
+                                td.rows.add(rowCopy);
+                            }
+                            return td;
+                        } finally {
+                            activeDatabaseName = savedDb;
+                            activeSchemaJson = savedSchema;
+                        }
+                    }
+
+                    JSONArray colArr = ts.getJSONArray("columns");
+                    JSONArray typArr = ts.getJSONArray("types");
+                    List<String> cols = new ArrayList<>();
+                    List<String> typs = new ArrayList<>();
+                    for (int i = 0; i < colArr.length(); i++) {
+                        cols.add(colArr.getString(i));
+                        typs.add(typArr.getString(i));
+                    }
+                    TableData td = new TableData(actualTableName, cols, typs);
+                    JSONArray rowsArr = storageEngine.readTableRows(targetDb, actualTableName);
+                    td.loadFromJSON(rowsArr);
+                    return td;
+                }
             }
         }
 
