@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<network-security-config>
+    <domain-config cleartextTrafficPermitted="false">
+        <domain includeSubdomains="true">api.pocketsql.com</domain>
+        <domain includeSubdomains="true">localhost</domain>
+        <pin-set expiration="2027-12-31">
+            <!-- Pin SHA-256 hash of the server's public key certificate in Base64 -->
+            <pin digest="SHA-256">mE82gIY884c7d659a2feaa0c55ad015a3bf4f1b2b0b=</pin>
+            <!-- Backup Pin in Base64 -->
+            <pin digest="SHA-256">kE5da52ed12644d659a2feaa0c55ad015a3bf4f1b2b=</pin>
+        </pin-set>
+    </domain-config>
+</network-security-config>

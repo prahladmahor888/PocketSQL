@@ -234,7 +234,7 @@ public class SystemDatabasesUnitTest {
     }
 
     @Test
-    public void testSystemSchemasPersistedAndDescribe() {
+    public void testSystemSchemasPersistedAndDescribe() throws Exception {
         File databasesDir = new File(testDir, "databases");
         File infoSchemaDir = new File(databasesDir, "information_schema");
         File pocketsqlDir = new File(databasesDir, "pocketsql");
@@ -247,10 +247,46 @@ public class SystemDatabasesUnitTest {
         File infoSchemaJson = new File(infoSchemaDir, "schema.json");
         File pocketsqlJson = new File(pocketsqlDir, "schema.json");
         File sysJson = new File(sysDir, "schema.json");
+        File usersJson = new File(testDir, "users.json");
 
         assertTrue("information_schema.json should exist", infoSchemaJson.exists());
         assertTrue("pocketsql.json should exist", pocketsqlJson.exists());
         assertTrue("sys.json should exist", sysJson.exists());
+        assertTrue("users.json should exist", usersJson.exists());
+
+        // Assert that they are encrypted at rest (i.e. not parseable as raw JSON)
+        try {
+            String rawUsers = new String(java.nio.file.Files.readAllBytes(usersJson.toPath()), java.nio.charset.StandardCharsets.UTF_8);
+            new org.json.JSONObject(rawUsers);
+            fail("users.json is stored as plaintext JSON!");
+        } catch (org.json.JSONException e) {
+            // Expected encryption
+        }
+
+        // Assert that they are encrypted at rest (i.e. not parseable as raw JSON)
+        try {
+            String rawInfo = new String(java.nio.file.Files.readAllBytes(infoSchemaJson.toPath()), java.nio.charset.StandardCharsets.UTF_8);
+            new org.json.JSONObject(rawInfo);
+            fail("information_schema.json is stored as plaintext JSON!");
+        } catch (org.json.JSONException e) {
+            // Expected encryption
+        }
+
+        try {
+            String rawPocket = new String(java.nio.file.Files.readAllBytes(pocketsqlJson.toPath()), java.nio.charset.StandardCharsets.UTF_8);
+            new org.json.JSONObject(rawPocket);
+            fail("pocketsql.json is stored as plaintext JSON!");
+        } catch (org.json.JSONException e) {
+            // Expected encryption
+        }
+
+        try {
+            String rawSys = new String(java.nio.file.Files.readAllBytes(sysJson.toPath()), java.nio.charset.StandardCharsets.UTF_8);
+            new org.json.JSONObject(rawSys);
+            fail("sys.json is stored as plaintext JSON!");
+        } catch (org.json.JSONException e) {
+            // Expected encryption
+        }
 
         engine.execute("USE pocketsql;");
         QueryResult describeUser = engine.execute("DESCRIBE user;");
@@ -343,5 +379,64 @@ public class SystemDatabasesUnitTest {
         assertEquals(1, selectSslStatus.rows.size());
         assertEquals("TLSv1.3", selectSslStatus.rows.get(0).get("ssl_version"));
         assertEquals("TLS_AES_256_GCM_SHA384", selectSslStatus.rows.get(0).get("ssl_cipher"));
+    }
+
+    @Test
+    public void testSystemDatabaseExportImportSync() throws Exception {
+        // Initially, only root@localhost exists
+        QueryResult r1 = engine.execute("SELECT * FROM pocketsql.user;");
+        assertTrue(r1.success);
+        int initialUserCount = r1.rows.size();
+        
+        // Create the school database
+        QueryResult rDb = engine.execute("CREATE DATABASE school;");
+        assertTrue(rDb.message, rDb.success);
+
+        // Add a new user with some privileges
+        QueryResult r2 = engine.execute("CREATE USER 'backup_user'@'localhost' IDENTIFIED BY 'pass123';");
+        assertTrue(r2.message, r2.success);
+        
+        QueryResult r3 = engine.execute("GRANT SELECT, INSERT ON school.* TO 'backup_user'@'localhost';");
+        assertTrue(r3.message, r3.success);
+        
+        // Export the pocketsql database to a ZIP backup
+        File backupFile = new File(testDir, "pocketsql_backup.zip");
+        try (java.io.FileOutputStream fos = new java.io.FileOutputStream(backupFile)) {
+            com.mysql.pocketsql.engine.DatabaseExporter.exportDatabase(engine, "pocketsql", fos, "zip");
+        }
+        assertTrue(backupFile.exists());
+        
+        // Now drop the user to verify the restore works
+        QueryResult r4 = engine.execute("DROP USER 'backup_user'@'localhost';");
+        assertTrue(r4.success);
+        
+        // Verify user is gone
+        QueryResult r5 = engine.execute("SELECT * FROM pocketsql.user;");
+        assertTrue(r5.success);
+        assertEquals(initialUserCount, r5.rows.size());
+        
+        // Import the pocketsql database zip back
+        try (java.io.FileInputStream fis = new java.io.FileInputStream(backupFile)) {
+            com.mysql.pocketsql.engine.DatabaseExporter.importDatabase(engine, "pocketsql", fis, "zip");
+        }
+        
+        // Verify that 'backup_user'@'localhost' is restored with correct privileges!
+        QueryResult r6 = engine.execute("SELECT * FROM pocketsql.user;");
+        assertTrue(r6.success);
+        assertEquals(initialUserCount + 1, r6.rows.size());
+        
+        boolean foundRestored = false;
+        for (Map<String, Object> row : r6.rows) {
+            if ("backup_user".equals(row.get("User"))) {
+                foundRestored = true;
+                break;
+            }
+        }
+        assertTrue("Restored backup_user should be found", foundRestored);
+        
+        // Verify privileges are restored
+        engine.setCurrentUser("backup_user", "localhost");
+        QueryResult privCheck = engine.execute("USE school;");
+        assertTrue("Restored user should be able to USE school database: " + privCheck.message, privCheck.success);
     }
 }

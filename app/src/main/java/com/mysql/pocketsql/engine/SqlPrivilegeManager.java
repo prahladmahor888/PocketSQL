@@ -60,7 +60,7 @@ public class SqlPrivilegeManager {
                 }
             }
         } catch (Exception e) {
-            e.printStackTrace();
+            com.mysql.pocketsql.engine.SqlLog.printStackTrace(e);
         }
         return false;
     }
@@ -74,10 +74,31 @@ public class SqlPrivilegeManager {
         }
         
         JSONObject userObj = new JSONObject();
-        userObj.put("password", password);
+        userObj.put("password", SecurityHelper.hashPassword(password));
         userObj.put("privileges", new JSONObject());
         
         engine.cachedUsers.put(key, userObj);
+        engine.storageEngine.writeUsers(engine.cachedUsers);
+        
+        return QueryResult.createSuccess("Query OK, 0 rows affected", 0, 0);
+    }
+
+    public QueryResult dropUser(String username, String host) throws Exception {
+        return dropUser(username, host, false);
+    }
+
+    public QueryResult dropUser(String username, String host, boolean ifExists) throws Exception {
+        verifyPrivilege("ALL", "*", "*");
+        
+        String key = username + "@" + host;
+        if (!engine.cachedUsers.has(key)) {
+            if (ifExists) {
+                return QueryResult.createSuccess("Query OK, 0 rows affected", 0, 0);
+            }
+            throw new Exception("Error: Operation DROP USER failed for '" + username + "'@'" + host + "'");
+        }
+        
+        engine.cachedUsers.remove(key);
         engine.storageEngine.writeUsers(engine.cachedUsers);
         
         return QueryResult.createSuccess("Query OK, 0 rows affected", 0, 0);
@@ -170,7 +191,7 @@ public class SqlPrivilegeManager {
     public void initializeAdminUser(String username, String host, String password) throws Exception {
         JSONObject defaultUsers = new JSONObject();
         JSONObject adminUser = new JSONObject();
-        adminUser.put("password", password);
+        adminUser.put("password", SecurityHelper.hashPassword(password));
         JSONObject privs = new JSONObject();
         JSONArray adminPrivs = new JSONArray();
         adminPrivs.put("ALL");
@@ -185,7 +206,7 @@ public class SqlPrivilegeManager {
         try {
             initializeAdminUser("root", "localhost", "");
         } catch (Exception e) {
-            e.printStackTrace();
+            com.mysql.pocketsql.engine.SqlLog.printStackTrace(e);
         }
     }
 }

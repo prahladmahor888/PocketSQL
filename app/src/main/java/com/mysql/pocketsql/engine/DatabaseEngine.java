@@ -142,13 +142,13 @@ public class DatabaseEngine {
                         
                         schemaJson.put(tbl, tableSchema);
                     } catch (Exception e) {
-                        e.printStackTrace();
+                        com.mysql.pocketsql.engine.SqlLog.printStackTrace(e);
                     }
                 }
                 storageEngine.writeSchema(db, schemaJson);
             }
         } catch (Exception e) {
-            e.printStackTrace();
+            com.mysql.pocketsql.engine.SqlLog.printStackTrace(e);
         }
     }    public void setCurrentUser(String username, String host) {
         this.currentUser = username;
@@ -172,7 +172,7 @@ public class DatabaseEngine {
         try {
             this.cachedUsers = storageEngine.readUsers();
         } catch (Exception e) {
-            e.printStackTrace();
+            com.mysql.pocketsql.engine.SqlLog.printStackTrace(e);
             this.cachedUsers = new JSONObject();
         }
     }
@@ -180,10 +180,18 @@ public class DatabaseEngine {
     public boolean authenticate(String username, String password) {
         try {
             loadUsers();
+            
             String key = username + "@localhost";
             if (cachedUsers.has(key)) {
                 JSONObject userObj = cachedUsers.getJSONObject(key);
-                if (userObj.getString("password").equals(password)) {
+                String stored = userObj.getString("password");
+                if (SecurityHelper.verifyPassword(password, stored)) {
+                    // Dynamic Upgrade: if legacy format (not starting with $argon2id$) was stored, upgrade it to Argon2id
+                    if (!stored.startsWith("$argon2id$")) {
+                        String newHash = SecurityHelper.hashPassword(password);
+                        userObj.put("password", newHash);
+                        storageEngine.writeUsers(cachedUsers);
+                    }
                     setCurrentUser(username, "localhost");
                     return true;
                 }
@@ -194,14 +202,21 @@ public class DatabaseEngine {
                 String[] parts = k.split("@");
                 if (parts.length == 2 && parts[0].equals(username)) {
                     JSONObject userObj = cachedUsers.getJSONObject(k);
-                    if (userObj.getString("password").equals(password)) {
+                    String stored = userObj.getString("password");
+                    if (SecurityHelper.verifyPassword(password, stored)) {
+                        // Dynamic Upgrade: if legacy format (not starting with $argon2id$) was stored, upgrade it to Argon2id
+                        if (!stored.startsWith("$argon2id$")) {
+                            String newHash = SecurityHelper.hashPassword(password);
+                            userObj.put("password", newHash);
+                            storageEngine.writeUsers(cachedUsers);
+                        }
                         setCurrentUser(username, parts[1]);
                         return true;
                     }
                 }
             }
         } catch (Exception e) {
-            e.printStackTrace();
+            com.mysql.pocketsql.engine.SqlLog.printStackTrace(e);
         }
         return false;
     }
@@ -262,7 +277,7 @@ public class DatabaseEngine {
         } catch (SqlSyntaxException e) {
             return QueryResult.createError("Syntax Error: " + e.getMessage());
         } catch (Throwable e) {
-            e.printStackTrace();
+            com.mysql.pocketsql.engine.SqlLog.printStackTrace(e);
             return QueryResult.createError("Database Error: " + e.getMessage());
         }
     }
@@ -3409,6 +3424,14 @@ public class DatabaseEngine {
 
     public QueryResult createUser(String username, String host, String password) throws Exception {
         return privilegeManager.createUser(username, host, password);
+    }
+
+    public QueryResult dropUser(String username, String host) throws Exception {
+        return privilegeManager.dropUser(username, host, false);
+    }
+
+    public QueryResult dropUser(String username, String host, boolean ifExists) throws Exception {
+        return privilegeManager.dropUser(username, host, ifExists);
     }
 
     public QueryResult grantPrivileges(List<String> privileges, String dbPattern, String username, String host) throws Exception {

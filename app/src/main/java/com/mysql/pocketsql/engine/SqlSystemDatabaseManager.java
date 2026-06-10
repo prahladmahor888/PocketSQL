@@ -358,7 +358,7 @@ public class SqlSystemDatabaseManager {
                             td.rows.add(r);
                         }
                     } catch (Exception e) {
-                        e.printStackTrace();
+                        com.mysql.pocketsql.engine.SqlLog.printStackTrace(e);
                     }
                 }
                 return td;
@@ -438,7 +438,7 @@ public class SqlSystemDatabaseManager {
                             }
                         }
                     } catch (Exception e) {
-                        e.printStackTrace();
+                        com.mysql.pocketsql.engine.SqlLog.printStackTrace(e);
                     }
                 }
                 return td;
@@ -513,7 +513,7 @@ public class SqlSystemDatabaseManager {
                             }
                         }
                     } catch (Exception e) {
-                        e.printStackTrace();
+                        com.mysql.pocketsql.engine.SqlLog.printStackTrace(e);
                     }
                 }
                 return td;
@@ -626,7 +626,7 @@ public class SqlSystemDatabaseManager {
                             }
                         }
                     } catch (Exception e) {
-                        e.printStackTrace();
+                        com.mysql.pocketsql.engine.SqlLog.printStackTrace(e);
                     }
                 }
                 return td;
@@ -687,7 +687,7 @@ public class SqlSystemDatabaseManager {
                             }
                         }
                     } catch (Exception e) {
-                        e.printStackTrace();
+                        com.mysql.pocketsql.engine.SqlLog.printStackTrace(e);
                     }
                 }
                 return td;
@@ -2013,7 +2013,7 @@ public class SqlSystemDatabaseManager {
                             r.put("db", dbName); r.put("object_type", "VIEW"); r.put("count", (long) viewCount);
                             td.rows.add(r);
                         }
-                    } catch (Exception e) { e.printStackTrace(); }
+                    } catch (Exception e) { com.mysql.pocketsql.engine.SqlLog.printStackTrace(e); }
                 }
                 return td;
             }
@@ -2081,7 +2081,7 @@ public class SqlSystemDatabaseManager {
                             r.put("io_misc_requests", 0L); r.put("io_misc_latency", isRaw ? 0L : "0.00 ms");
                             td.rows.add(r);
                         }
-                    } catch (Exception e) { e.printStackTrace(); }
+                    } catch (Exception e) { com.mysql.pocketsql.engine.SqlLog.printStackTrace(e); }
                 }
                 return td;
             }
@@ -2515,7 +2515,7 @@ public class SqlSystemDatabaseManager {
                         addSystemCol(td, db, tbl, colName, i + 1, colType);
                     }
                 } catch (Exception e) {
-                    e.printStackTrace();
+                    com.mysql.pocketsql.engine.SqlLog.printStackTrace(e);
                 }
             }
         }
@@ -2553,7 +2553,7 @@ public class SqlSystemDatabaseManager {
                 }
             }
         } catch (Exception e) {
-            e.printStackTrace();
+            com.mysql.pocketsql.engine.SqlLog.printStackTrace(e);
         }
         return false;
     }

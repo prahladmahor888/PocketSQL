@@ -883,8 +883,18 @@ public class SqlParser {
             expect(SqlToken.Type.IDENTIFIER, "Expected event name");
             String eventName = tokens.get(pos - 1).value;
             return new Command.DropEvent(eventName, ifExists);
+        } else if (matchKeyword("USER")) {
+            boolean ifExists = false;
+            if (matchKeyword("IF")) {
+                expectKeyword("EXISTS", "Expected 'EXISTS' after 'DROP USER IF'");
+                ifExists = true;
+            }
+            String[] userSpec = parseUserSpec();
+            String username = userSpec[0];
+            String host = userSpec[1];
+            return new Command.DropUser(username, host, ifExists);
         } else {
-            throw new SqlSyntaxException("Expected 'DATABASE', 'TABLE', 'FUNCTION', 'VIEW', 'PROCEDURE', 'TRIGGER', or 'EVENT' after 'DROP'", peek().position);
+            throw new SqlSyntaxException("Expected 'DATABASE', 'TABLE', 'USER', 'FUNCTION', 'VIEW', 'PROCEDURE', 'TRIGGER', or 'EVENT' after 'DROP'", peek().position);
         }
     }
 

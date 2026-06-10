@@ -48,7 +48,7 @@ public class SqlApiKeyManager {
             }
             cachedKeys = new JSONObject(content);
         } catch (Exception e) {
-            e.printStackTrace();
+            com.mysql.pocketsql.engine.SqlLog.printStackTrace(e);
             cachedKeys = new JSONObject();
         }
     }
@@ -59,18 +59,14 @@ public class SqlApiKeyManager {
                 baseDir.mkdirs();
             }
             String content = cachedKeys.toString(2);
-            try {
-                content = SecurityHelper.encrypt(content);
-            } catch (Exception e) {
-                // Fallback
-            }
+            String encrypted = SecurityHelper.encrypt(content);
             try (FileOutputStream fos = new FileOutputStream(keysFile);
                  OutputStreamWriter osw = new OutputStreamWriter(fos, StandardCharsets.UTF_8);
                  BufferedWriter writer = new BufferedWriter(osw)) {
-                writer.write(content);
+                writer.write(encrypted);
             }
         } catch (Exception e) {
-            e.printStackTrace();
+            com.mysql.pocketsql.engine.SqlLog.printStackTrace(e);
         }
     }
 
@@ -96,7 +92,7 @@ public class SqlApiKeyManager {
             cachedKeys.put(newKey, keyData);
             saveKeys();
         } catch (Exception e) {
-            e.printStackTrace();
+            com.mysql.pocketsql.engine.SqlLog.printStackTrace(e);
         }
         return newKey;
     }

@@ -995,4 +995,25 @@ public interface Command {
             return engine.importDatabase(dbName, filePath);
         }
     }
+
+    class DropUser implements Command {
+        public final String username;
+        public final String host;
+        public final boolean ifExists;
+
+        public DropUser(String username, String host) {
+            this(username, host, false);
+        }
+
+        public DropUser(String username, String host, boolean ifExists) {
+            this.username = username;
+            this.host = host;
+            this.ifExists = ifExists;
+        }
+
+        @Override
+        public QueryResult execute(DatabaseEngine engine) throws Exception {
+            return engine.dropUser(username, host, ifExists);
+        }
+    }
 }

@@ -8,17 +8,19 @@ import java.util.Collections;
 import java.util.List;
 
 public class SqlApiHelper {
+    private static Context context;
     private static DatabaseEngine engine;
     private static SqlApiKeyManager apiKeyManager;
     private static SqlApiServer apiServer;
 
-    public static synchronized void init(Context context) {
+    public static Context getContext() {
+        return context;
+    }
+
+    public static synchronized void init(Context ctx) {
         if (engine == null) {
-            Context appCtx = context.getApplicationContext();
-            File filesDir = appCtx.getFilesDir();
-            
-            // Migrate old public external storage files to private internal storage
-            migrateExternalToInternal(appCtx, filesDir);
+            context = ctx.getApplicationContext();
+            File filesDir = context.getFilesDir();
 
             File pocketsqlDir = new File(filesDir, "PocketSQL");
             if (!pocketsqlDir.exists()) {
@@ -35,88 +37,6 @@ public class SqlApiHelper {
         }
     }
 
-    private static void migrateExternalToInternal(Context context, File internalBaseDir) {
-        try {
-            File extFiles = context.getExternalFilesDir(null);
-            if (extFiles == null) {
-                return;
-            }
-            File srcDir = new File(extFiles, "PocketSQL");
-            if (!srcDir.exists() || !srcDir.isDirectory()) {
-                return;
-            }
-            File destDir = new File(internalBaseDir, "PocketSQL");
-            if (!destDir.exists()) {
-                destDir.mkdirs();
-            }
-            copyDirectory(srcDir, destDir);
-            deleteDirectory(srcDir);
-        } catch (Exception e) {
-            e.printStackTrace();
-        }
-    }
-
-    private static void copyDirectory(File source, File destination) throws java.io.IOException {
-        if (source.isDirectory()) {
-            if (!destination.exists()) {
-                destination.mkdirs();
-            }
-            String[] files = source.list();
-            if (files != null) {
-                for (String file : files) {
-                    copyDirectory(new File(source, file), new File(destination, file));
-                }
-            }
-        } else {
-            String name = source.getName();
-            if (name.endsWith(".pqsql") || name.endsWith(".json")) {
-                try {
-                    copyWithEncryption(source, destination);
-                } catch (Exception e) {
-                    rawCopy(source, destination);
-                }
-            } else {
-                rawCopy(source, destination);
-            }
-        }
-    }
-
-    private static void rawCopy(File source, File destination) throws java.io.IOException {
-        try (java.io.InputStream in = new java.io.FileInputStream(source);
-             java.io.OutputStream out = new java.io.FileOutputStream(destination)) {
-            byte[] buffer = new byte[1024];
-            int length;
-            while ((length = in.read(buffer)) > 0) {
-                out.write(buffer, 0, length);
-            }
-        }
-    }
-
-    private static void copyWithEncryption(File source, File destination) throws Exception {
-        StringBuilder sb = new StringBuilder();
-        try (java.io.FileInputStream fis = new java.io.FileInputStream(source);
-             java.io.InputStreamReader isr = new java.io.InputStreamReader(fis, java.nio.charset.StandardCharsets.UTF_8);
-             java.io.BufferedReader reader = new java.io.BufferedReader(isr)) {
-            String line;
-            while ((line = reader.readLine()) != null) {
-                sb.append(line).append("\n");
-            }
-        }
-        String content = sb.toString();
-        String plainText;
-        try {
-            plainText = SecurityHelper.decrypt(content);
-        } catch (Exception e) {
-            plainText = content;
-        }
-        String encrypted = SecurityHelper.encrypt(plainText);
-        try (java.io.FileOutputStream fos = new java.io.FileOutputStream(destination);
-             java.io.OutputStreamWriter osw = new java.io.OutputStreamWriter(fos, java.nio.charset.StandardCharsets.UTF_8);
-             java.io.BufferedWriter writer = new java.io.BufferedWriter(osw)) {
-            writer.write(encrypted);
-        }
-    }
-
     private static void encryptExistingPlaintextFiles(File directory) {
         if (!directory.exists()) return;
         File[] files = directory.listFiles();
@@ -130,7 +50,7 @@ public class SqlApiHelper {
                     try {
                         encryptFileIfNeeded(file);
                     } catch (Exception e) {
-                        e.printStackTrace();
+                        SqlLog.printStackTrace(e);
                     }
                 }
             }
@@ -162,18 +82,6 @@ public class SqlApiHelper {
         }
     }
 
-    private static void deleteDirectory(File file) {
-        if (file.isDirectory()) {
-            File[] files = file.listFiles();
-            if (files != null) {
-                for (File child : files) {
-                    deleteDirectory(child);
-                }
-            }
-        }
-        file.delete();
-    }
-
     public static DatabaseEngine getEngine() {
         return engine;
     }
@@ -202,7 +110,7 @@ public class SqlApiHelper {
                 }
             }
         } catch (Exception ex) {
-            ex.printStackTrace();
+            SqlLog.printStackTrace(ex);
         }
         return "localhost";
     }

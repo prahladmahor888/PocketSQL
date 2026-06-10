@@ -38,11 +38,18 @@ public class SqlApiServer {
         boolean bound = false;
         while (!bound && targetPort < port + 20) {
             try {
-                serverSocket = new ServerSocket(targetPort);
+                serverSocket = TlsServerHelper.getSslServerSocketFactory().createServerSocket(targetPort);
+                ((javax.net.ssl.SSLServerSocket) serverSocket).setEnabledProtocols(new String[]{"TLSv1.3"});
                 activePort = targetPort;
                 bound = true;
-            } catch (java.io.IOException e) {
-                targetPort++;
+            } catch (Exception e) {
+                try {
+                    serverSocket = new ServerSocket(targetPort);
+                    activePort = targetPort;
+                    bound = true;
+                } catch (java.io.IOException ex) {
+                    targetPort++;
+                }
             }
         }
         if (!bound) {
@@ -66,7 +73,7 @@ public class SqlApiServer {
                 serverSocket = null;
             }
         } catch (Exception e) {
-            e.printStackTrace();
+            com.mysql.pocketsql.engine.SqlLog.printStackTrace(e);
         }
         if (threadPool != null) {
             threadPool.shutdownNow();
@@ -93,7 +100,7 @@ public class SqlApiServer {
             }
         } catch (Exception e) {
             if (isRunning) {
-                e.printStackTrace();
+                com.mysql.pocketsql.engine.SqlLog.printStackTrace(e);
             }
         }
     }
@@ -228,7 +235,7 @@ public class SqlApiServer {
             }
 
         } catch (Exception e) {
-            e.printStackTrace();
+            com.mysql.pocketsql.engine.SqlLog.printStackTrace(e);
         } finally {
             try {
                 socket.close();
@@ -305,7 +312,7 @@ public class SqlApiServer {
                 json.put("rows", rowsArr);
             }
         } catch (Exception e) {
-            e.printStackTrace();
+            com.mysql.pocketsql.engine.SqlLog.printStackTrace(e);
         }
         return json;
     }
@@ -324,5 +331,9 @@ public class SqlApiServer {
 
     public String getBindErrorMessage() {
         return bindErrorMessage;
+    }
+
+    public boolean isTlsEnabled() {
+        return serverSocket instanceof javax.net.ssl.SSLServerSocket;
     }
 }

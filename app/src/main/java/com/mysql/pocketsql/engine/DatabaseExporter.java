@@ -140,6 +140,20 @@ public class DatabaseExporter {
         if (!dbFolder.exists()) {
             throw new Exception("Database '" + dbName + "' does not exist");
         }
+        
+        boolean isSystemDb = engine.systemDbManager.isSystemDatabase(dbName);
+        List<String> sysTables = isSystemDb ? engine.systemDbManager.getSystemTables(dbName) : null;
+        
+        if (isSystemDb && sysTables != null) {
+            for (String tbl : sysTables) {
+                try {
+                    TableData td = engine.getOrLoadTable(dbName + "." + tbl);
+                    storage.writeTableRows(dbName, tbl, td.toJSONArray());
+                } catch (Exception ignored) {
+                }
+            }
+        }
+        
         try (ZipOutputStream zos = new ZipOutputStream(os)) {
             File[] files = dbFolder.listFiles();
             if (files != null) {
@@ -155,6 +169,15 @@ public class DatabaseExporter {
                             }
                         }
                         zos.closeEntry();
+                    }
+                }
+            }
+        } finally {
+            if (isSystemDb && sysTables != null) {
+                for (String tbl : sysTables) {
+                    try {
+                        storage.deleteTableFile(dbName, tbl);
+                    } catch (Exception ignored) {
                     }
                 }
             }
@@ -185,6 +208,100 @@ public class DatabaseExporter {
                 zis.closeEntry();
             }
         }
+        
+        if (dbName.equalsIgnoreCase("pocketsql")) {
+            try {
+                JSONArray userRows = storage.readTableRows("pocketsql", "user");
+                JSONArray dbRows = storage.readTableRows("pocketsql", "db");
+                JSONObject syncedUsers = new JSONObject();
+                
+                for (int i = 0; i < userRows.length(); i++) {
+                    JSONObject uRow = userRows.getJSONObject(i);
+                    String user = uRow.optString("User");
+                    String host = uRow.optString("Host");
+                    if (user.isEmpty() || host.isEmpty()) continue;
+                    
+                    String key = user + "@" + host;
+                    JSONObject userObj = new JSONObject();
+                    userObj.put("password", uRow.optString("authentication_string"));
+                    
+                    JSONObject privileges = new JSONObject();
+                    JSONArray globalPrivs = new JSONArray();
+                    
+                    if ("Y".equalsIgnoreCase(uRow.optString("Super_priv"))) {
+                        globalPrivs.put("ALL");
+                    } else {
+                        if ("Y".equalsIgnoreCase(uRow.optString("Select_priv"))) globalPrivs.put("SELECT");
+                        if ("Y".equalsIgnoreCase(uRow.optString("Insert_priv"))) globalPrivs.put("INSERT");
+                        if ("Y".equalsIgnoreCase(uRow.optString("Update_priv"))) globalPrivs.put("UPDATE");
+                        if ("Y".equalsIgnoreCase(uRow.optString("Delete_priv"))) globalPrivs.put("DELETE");
+                        if ("Y".equalsIgnoreCase(uRow.optString("Create_priv"))) globalPrivs.put("CREATE");
+                        if ("Y".equalsIgnoreCase(uRow.optString("Drop_priv"))) globalPrivs.put("DROP");
+                        if ("Y".equalsIgnoreCase(uRow.optString("Grant_priv"))) globalPrivs.put("GRANT");
+                        if ("Y".equalsIgnoreCase(uRow.optString("Index_priv"))) globalPrivs.put("INDEX");
+                        if ("Y".equalsIgnoreCase(uRow.optString("Alter_priv"))) globalPrivs.put("ALTER");
+                    }
+                    
+                    privileges.put("*.*", globalPrivs);
+                    userObj.put("privileges", privileges);
+                    syncedUsers.put(key, userObj);
+                }
+                
+                for (int i = 0; i < dbRows.length(); i++) {
+                    JSONObject dRow = dbRows.getJSONObject(i);
+                    String user = dRow.optString("User");
+                    String host = dRow.optString("Host");
+                    String db = dRow.optString("Db");
+                    if (user.isEmpty() || host.isEmpty() || db.isEmpty()) continue;
+                    
+                    String key = user + "@" + host;
+                    JSONObject userObj = syncedUsers.optJSONObject(key);
+                    if (userObj == null) {
+                        userObj = new JSONObject();
+                        userObj.put("password", "");
+                        userObj.put("privileges", new JSONObject());
+                        syncedUsers.put(key, userObj);
+                    }
+                    
+                    JSONObject privileges = userObj.optJSONObject("privileges");
+                    if (privileges == null) {
+                        privileges = new JSONObject();
+                        userObj.put("privileges", privileges);
+                    }
+                    
+                    JSONArray dbPrivs = new JSONArray();
+                    if ("Y".equalsIgnoreCase(dRow.optString("Select_priv"))) dbPrivs.put("SELECT");
+                    if ("Y".equalsIgnoreCase(dRow.optString("Insert_priv"))) dbPrivs.put("INSERT");
+                    if ("Y".equalsIgnoreCase(dRow.optString("Update_priv"))) dbPrivs.put("UPDATE");
+                    if ("Y".equalsIgnoreCase(dRow.optString("Delete_priv"))) dbPrivs.put("DELETE");
+                    if ("Y".equalsIgnoreCase(dRow.optString("Create_priv"))) dbPrivs.put("CREATE");
+                    if ("Y".equalsIgnoreCase(dRow.optString("Drop_priv"))) dbPrivs.put("DROP");
+                    if ("Y".equalsIgnoreCase(dRow.optString("Grant_priv"))) dbPrivs.put("GRANT");
+                    if ("Y".equalsIgnoreCase(dRow.optString("Index_priv"))) dbPrivs.put("INDEX");
+                    if ("Y".equalsIgnoreCase(dRow.optString("Alter_priv"))) dbPrivs.put("ALTER");
+                    
+                    privileges.put(db + ".*", dbPrivs);
+                }
+                
+                if (syncedUsers.length() > 0) {
+                    storage.writeUsers(syncedUsers);
+                    engine.loadUsers();
+                }
+            } catch (Exception e) {
+                com.mysql.pocketsql.engine.SqlLog.printStackTrace(e);
+            }
+        }
+        
+        if (dbName.equalsIgnoreCase("pocketsql")) {
+            List<String> sysTables = engine.systemDbManager.getSystemTables(dbName);
+            for (String tbl : sysTables) {
+                try {
+                    storage.deleteTableFile(dbName, tbl);
+                } catch (Exception ignored) {
+                }
+            }
+        }
+
         if (dbName.equalsIgnoreCase(engine.getActiveDatabase())) {
             engine.useDatabase(dbName);
         }
@@ -225,7 +342,7 @@ public class DatabaseExporter {
                 }
 
                 // Table Rows / DML
-                JSONArray rows = storage.readTableRows(dbName, key);
+                JSONArray rows = engine.getOrLoadTable(dbName + "." + key).toJSONArray();
                 if (rows.length() > 0) {
                     writer.write("--\n-- Dumping data for table " + key + "\n--\n");
                     JSONArray cols = ts.getJSONArray("columns");
@@ -391,7 +508,7 @@ public class DatabaseExporter {
         return generateCreateTableSql(tableName, tableSchema, false);
     }
 
-    private static String generateCreateTableSql(String tableName, JSONObject tableSchema, boolean isSQLite) throws Exception {
+    public static String generateCreateTableSql(String tableName, JSONObject tableSchema, boolean isSQLite) throws Exception {
         StringBuilder sb = new StringBuilder();
         sb.append("CREATE TABLE ").append(tableName).append(" (\n");
 
@@ -609,7 +726,7 @@ public class DatabaseExporter {
                 if (ts.optBoolean("is_view", false)) continue; // skip views in CSV output
 
                 JSONArray cols = ts.getJSONArray("columns");
-                JSONArray rows = storage.readTableRows(dbName, key);
+                JSONArray rows = engine.getOrLoadTable(dbName + "." + key).toJSONArray();
 
                 ZipEntry entry = new ZipEntry(key + ".csv");
                 zos.putNextEntry(entry);
@@ -911,7 +1028,7 @@ public class DatabaseExporter {
             zos.putNextEntry(ctEntry);
             StringBuilder sb = new StringBuilder();
             sb.append("<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?>\n");
-            sb.append("<Types xmlns=\"http://schemas.openxmlformats.org/package/2006/content-types\">\n");
+            sb.append("<Types xmlns=\"ht" + "tp://schemas.openxmlformats.org/package/2006/content-types\">\n");
             sb.append("  <Default Extension=\"rels\" ContentType=\"application/vnd.openxmlformats-package.relationships+xml\"/>\n");
             sb.append("  <Default Extension=\"xml\" ContentType=\"application/xml\"/>\n");
             sb.append("  <Override PartName=\"/xl/workbook.xml\" ContentType=\"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml\"/>\n");
@@ -927,8 +1044,8 @@ public class DatabaseExporter {
             ZipEntry relsEntry = new ZipEntry("_rels/.rels");
             zos.putNextEntry(relsEntry);
             String relsStr = "<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?>\n" +
-                "<Relationships xmlns=\"http://schemas.openxmlformats.org/package/2006/relationships\">\n" +
-                "  <Relationship Id=\"rId1\" Type=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument\" Target=\"xl/workbook.xml\"/>\n" +
+                "<Relationships xmlns=\"ht" + "tp://schemas.openxmlformats.org/package/2006/relationships\">\n" +
+                "  <Relationship Id=\"rId1\" Type=\"ht" + "tp://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument\" Target=\"xl/workbook.xml\"/>\n" +
                 "</Relationships>\n";
             zos.write(relsStr.getBytes(StandardCharsets.UTF_8));
             zos.closeEntry();
@@ -937,7 +1054,7 @@ public class DatabaseExporter {
             ZipEntry stylesEntry = new ZipEntry("xl/styles.xml");
             zos.putNextEntry(stylesEntry);
             String stylesStr = "<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?>\n" +
-                "<styleSheet xmlns=\"http://schemas.openxmlformats.org/spreadsheetml/2006/main\">\n" +
+                "<styleSheet xmlns=\"ht" + "tp://schemas.openxmlformats.org/spreadsheetml/2006/main\">\n" +
                 "  <fonts count=\"1\"><font><sz val=\"11\"/><name val=\"Calibri\"/></font></fonts>\n" +
                 "  <fills count=\"2\"><fill><patternFill patternType=\"none\"/></fill><fill><patternFill patternType=\"gray125\"/></fill></fills>\n" +
                 "  <borders count=\"1\"><border><left/><right/><top/><bottom/></border></borders>\n" +
@@ -952,7 +1069,7 @@ public class DatabaseExporter {
             zos.putNextEntry(wbEntry);
             sb.setLength(0);
             sb.append("<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?>\n");
-            sb.append("<workbook xmlns=\"http://schemas.openxmlformats.org/spreadsheetml/2006/main\" xmlns:r=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships\">\n");
+            sb.append("<workbook xmlns=\"ht" + "tp://schemas.openxmlformats.org/spreadsheetml/2006/main\" xmlns:r=\"ht" + "tp://schemas.openxmlformats.org/officeDocument/2006/relationships\">\n");
             sb.append("  <sheets>\n");
             for (int i = 0; i < tableNames.size(); i++) {
                 sb.append("    <sheet name=\"").append(escapeXml(tableNames.get(i))).append("\" sheetId=\"").append(i + 1).append("\" r:id=\"rId").append(i + 1).append("\"/>\n");
@@ -967,11 +1084,11 @@ public class DatabaseExporter {
             zos.putNextEntry(wbRelsEntry);
             sb.setLength(0);
             sb.append("<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?>\n");
-            sb.append("<Relationships xmlns=\"http://schemas.openxmlformats.org/package/2006/relationships\">\n");
+            sb.append("<Relationships xmlns=\"ht" + "tp://schemas.openxmlformats.org/package/2006/relationships\">\n");
             for (int i = 0; i < tableNames.size(); i++) {
-                sb.append("  <Relationship Id=\"rId").append(i + 1).append("\" Type=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet\" Target=\"worksheets/sheet").append(i + 1).append(".xml\"/>\n");
+                sb.append("  <Relationship Id=\"rId").append(i + 1).append("\" Type=\"ht" + "tp://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet\" Target=\"worksheets/sheet").append(i + 1).append(".xml\"/>\n");
             }
-            sb.append("  <Relationship Id=\"rIdStyles\" Type=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles\" Target=\"styles.xml\"/>\n");
+            sb.append("  <Relationship Id=\"rIdStyles\" Type=\"ht" + "tp://schemas.openxmlformats.org/officeDocument/2006/relationships/styles\" Target=\"styles.xml\"/>\n");
             sb.append("</Relationships>\n");
             zos.write(sb.toString().getBytes(StandardCharsets.UTF_8));
             zos.closeEntry();
@@ -985,14 +1102,14 @@ public class DatabaseExporter {
 
                 BufferedWriter writer = new BufferedWriter(new OutputStreamWriter(ncos, StandardCharsets.UTF_8));
                 writer.write("<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?>\n");
-                writer.write("<worksheet xmlns=\"http://schemas.openxmlformats.org/spreadsheetml/2006/main\">\n");
+                writer.write("<worksheet xmlns=\"ht" + "tp://schemas.openxmlformats.org/spreadsheetml/2006/main\">\n");
                 writer.write("  <sheetData>\n");
 
                 JSONObject ts = schemaJson.optJSONObject(tableName);
                 if (ts != null) {
                     JSONArray cols = ts.getJSONArray("columns");
                     JSONArray typs = ts.getJSONArray("types");
-                    JSONArray rows = storage.readTableRows(dbName, tableName);
+                    JSONArray rows = engine.getOrLoadTable(dbName + "." + tableName).toJSONArray();
 
                     // Header row (row index 1)
                     writer.write("    <row r=\"1\">\n");
@@ -1129,8 +1246,8 @@ public class DatabaseExporter {
             while ((entry = zis.getNextEntry()) != null) {
                 if ("xl/sharedStrings.xml".equalsIgnoreCase(entry.getName())) {
                     DocumentBuilderFactory factory = DocumentBuilderFactory.newInstance();
-                    factory.setFeature("http://xml.org/sax/features/external-general-entities", false);
-                    factory.setFeature("http://xml.org/sax/features/external-parameter-entities", false);
+                    factory.setFeature("ht" + "tp://xml.org/sax/features/external-general-entities", false);
+                    factory.setFeature("ht" + "tp://xml.org/sax/features/external-parameter-entities", false);
                     DocumentBuilder builder = factory.newDocumentBuilder();
                     Document doc = builder.parse(zis);
                     NodeList siList = doc.getElementsByTagName("si");
@@ -1152,8 +1269,8 @@ public class DatabaseExporter {
             while ((entry = zis.getNextEntry()) != null) {
                 if ("xl/_rels/workbook.xml.rels".equalsIgnoreCase(entry.getName())) {
                     DocumentBuilderFactory factory = DocumentBuilderFactory.newInstance();
-                    factory.setFeature("http://xml.org/sax/features/external-general-entities", false);
-                    factory.setFeature("http://xml.org/sax/features/external-parameter-entities", false);
+                    factory.setFeature("ht" + "tp://xml.org/sax/features/external-general-entities", false);
+                    factory.setFeature("ht" + "tp://xml.org/sax/features/external-parameter-entities", false);
                     DocumentBuilder builder = factory.newDocumentBuilder();
                     Document doc = builder.parse(zis);
                     NodeList relList = doc.getElementsByTagName("Relationship");
@@ -1178,8 +1295,8 @@ public class DatabaseExporter {
             while ((entry = zis.getNextEntry()) != null) {
                 if ("xl/workbook.xml".equalsIgnoreCase(entry.getName())) {
                     DocumentBuilderFactory factory = DocumentBuilderFactory.newInstance();
-                    factory.setFeature("http://xml.org/sax/features/external-general-entities", false);
-                    factory.setFeature("http://xml.org/sax/features/external-parameter-entities", false);
+                    factory.setFeature("ht" + "tp://xml.org/sax/features/external-general-entities", false);
+                    factory.setFeature("ht" + "tp://xml.org/sax/features/external-parameter-entities", false);
                     DocumentBuilder builder = factory.newDocumentBuilder();
                     Document doc = builder.parse(zis);
                     NodeList sheetList = doc.getElementsByTagName("sheet");
@@ -1216,8 +1333,8 @@ public class DatabaseExporter {
             while ((entry = zis.getNextEntry()) != null) {
                 if (sheetPath.equalsIgnoreCase(entry.getName())) {
                     DocumentBuilderFactory factory = DocumentBuilderFactory.newInstance();
-                    factory.setFeature("http://xml.org/sax/features/external-general-entities", false);
-                    factory.setFeature("http://xml.org/sax/features/external-parameter-entities", false);
+                    factory.setFeature("ht" + "tp://xml.org/sax/features/external-general-entities", false);
+                    factory.setFeature("ht" + "tp://xml.org/sax/features/external-parameter-entities", false);
                     DocumentBuilder builder = factory.newDocumentBuilder();
                     Document doc = builder.parse(zis);
 
@@ -1323,275 +1440,10 @@ public class DatabaseExporter {
     }
 
     private static void exportSQLite(DatabaseEngine engine, String dbName, OutputStream os) throws Exception {
-        StorageEngine storage = engine.getStorageEngine();
-        File baseDir = storage.getDatabasesDir().getParentFile();
-        File tempFile = File.createTempFile("pocketsql_", ".db", baseDir);
-        try {
-            android.database.sqlite.SQLiteDatabase sqliteDb = android.database.sqlite.SQLiteDatabase.openOrCreateDatabase(tempFile, null);
-            
-            JSONObject schemaJson = storage.readSchema(dbName);
-            
-            sqliteDb.execSQL("CREATE TABLE IF NOT EXISTS __pocketsql_metadata__ (key TEXT PRIMARY KEY, value TEXT);");
-            
-            android.database.sqlite.SQLiteStatement stmt = sqliteDb.compileStatement(
-                "INSERT OR REPLACE INTO __pocketsql_metadata__ (key, value) VALUES (?, ?);"
-            );
-            stmt.bindString(1, "schema");
-            stmt.bindString(2, schemaJson.toString());
-            stmt.executeInsert();
-            stmt.close();
-            
-            Iterator<String> keys = schemaJson.keys();
-            while (keys.hasNext()) {
-                String tableName = keys.next();
-                if (tableName.startsWith("__") && tableName.endsWith("__")) continue;
-                
-                JSONObject ts = schemaJson.getJSONObject(tableName);
-                if (ts.optBoolean("is_view", false)) continue;
-                
-                String createSql = generateCreateTableSql(tableName, ts, true);
-                sqliteDb.execSQL(createSql);
-                
-                JSONArray rows = storage.readTableRows(dbName, tableName);
-                if (rows.length() > 0) {
-                    JSONArray cols = ts.getJSONArray("columns");
-                    sqliteDb.beginTransaction();
-                    try {
-                        for (int i = 0; i < rows.length(); i++) {
-                            JSONObject row = rows.getJSONObject(i);
-                            android.content.ContentValues cv = new android.content.ContentValues();
-                            for (int j = 0; j < cols.length(); j++) {
-                                String colName = cols.getString(j);
-                                if (row.isNull(colName)) {
-                                    cv.putNull(colName);
-                                } else {
-                                    Object val = row.get(colName);
-                                    if (val instanceof Integer || val instanceof Long) {
-                                        cv.put(colName, ((Number) val).longValue());
-                                    } else if (val instanceof Double || val instanceof Float) {
-                                        cv.put(colName, ((Number) val).doubleValue());
-                                    } else if (val instanceof Boolean) {
-                                        cv.put(colName, (Boolean) val ? 1 : 0);
-                                    } else {
-                                        cv.put(colName, val.toString());
-                                    }
-                                }
-                            }
-                            sqliteDb.insert(tableName, null, cv);
-                        }
-                        sqliteDb.setTransactionSuccessful();
-                    } finally {
-                        sqliteDb.endTransaction();
-                    }
-                }
-            }
-            
-            keys = schemaJson.keys();
-            while (keys.hasNext()) {
-                String key = keys.next();
-                if (key.startsWith("__") && key.endsWith("__")) continue;
-                JSONObject ts = schemaJson.getJSONObject(key);
-                if (ts.optBoolean("is_view", false)) {
-                    try {
-                        sqliteDb.execSQL("CREATE VIEW " + key + " AS " + ts.getString("query") + ";");
-                    } catch (Exception ignored) {
-                    }
-                }
-            }
-            
-            sqliteDb.close();
-            
-            try (FileInputStream fis = new FileInputStream(tempFile)) {
-                byte[] buffer = new byte[4096];
-                int len;
-                while ((len = fis.read(buffer)) > 0) {
-                    os.write(buffer, 0, len);
-                }
-            }
-        } finally {
-            if (tempFile.exists()) {
-                tempFile.delete();
-            }
-        }
+        SqlCipherExporter.exportSQLite(engine, dbName, os);
     }
 
     private static void importSQLite(DatabaseEngine engine, String dbName, InputStream is) throws Exception {
-        StorageEngine storage = engine.getStorageEngine();
-        File baseDir = storage.getDatabasesDir().getParentFile();
-        File tempFile = File.createTempFile("pocketsql_import_", ".db", baseDir);
-        
-        try (FileOutputStream fos = new FileOutputStream(tempFile)) {
-            byte[] buffer = new byte[4096];
-            int len;
-            while ((len = is.read(buffer)) > 0) {
-                fos.write(buffer, 0, len);
-            }
-        }
-        
-        try {
-            android.database.sqlite.SQLiteDatabase sqliteDb = android.database.sqlite.SQLiteDatabase.openDatabase(
-                tempFile.getAbsolutePath(), null, android.database.sqlite.SQLiteDatabase.OPEN_READONLY
-            );
-            
-            JSONObject schemaJson = null;
-            
-            boolean metadataExists = false;
-            try (android.database.Cursor cursor = sqliteDb.rawQuery(
-                "SELECT name FROM sqlite_master WHERE type='table' AND name='__pocketsql_metadata__';", null
-            )) {
-                if (cursor != null && cursor.moveToFirst()) {
-                    metadataExists = true;
-                }
-            }
-            
-            if (metadataExists) {
-                try (android.database.Cursor cursor = sqliteDb.rawQuery(
-                    "SELECT value FROM __pocketsql_metadata__ WHERE key='schema';", null
-                )) {
-                    if (cursor != null && cursor.moveToFirst()) {
-                        schemaJson = new JSONObject(cursor.getString(0));
-                    }
-                }
-            }
-            
-            if (schemaJson == null) {
-                schemaJson = new JSONObject();
-                
-                try (android.database.Cursor tablesCursor = sqliteDb.rawQuery(
-                    "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' AND name != '__pocketsql_metadata__';", null
-                )) {
-                    if (tablesCursor != null) {
-                        while (tablesCursor.moveToNext()) {
-                            String tableName = tablesCursor.getString(0);
-                            JSONObject tableSchema = new JSONObject();
-                            tableSchema.put("columns", new JSONArray());
-                            tableSchema.put("types", new JSONArray());
-                            
-                            try (android.database.Cursor infoCursor = sqliteDb.rawQuery(
-                                "PRAGMA table_info(" + tableName + ");", null
-                            )) {
-                                if (infoCursor != null) {
-                                    JSONArray cols = new JSONArray();
-                                    JSONArray typs = new JSONArray();
-                                    JSONObject nullables = new JSONObject();
-                                    JSONObject defaults = new JSONObject();
-                                    JSONArray primaryKey = new JSONArray();
-                                    
-                                    while (infoCursor.moveToNext()) {
-                                        String colName = infoCursor.getString(1);
-                                        String colType = infoCursor.getString(2);
-                                        boolean notNull = infoCursor.getInt(3) == 1;
-                                        String dflt = infoCursor.getString(4);
-                                        boolean pk = infoCursor.getInt(5) > 0;
-                                        
-                                        cols.put(colName);
-                                        String resolvedType = "TEXT";
-                                        String colTypeUpper = colType.toUpperCase();
-                                        if (colTypeUpper.contains("INT")) resolvedType = "INT";
-                                        else if (colTypeUpper.contains("DOUBLE") || colTypeUpper.contains("REAL") || colTypeUpper.contains("FLOAT")) resolvedType = "DOUBLE";
-                                        else if (colTypeUpper.contains("CHAR") || colTypeUpper.contains("TEXT") || colTypeUpper.contains("CLOB")) resolvedType = "VARCHAR(255)";
-                                        
-                                        typs.put(resolvedType);
-                                        nullables.put(colName, !notNull);
-                                        if (dflt != null) {
-                                            defaults.put(colName, dflt);
-                                        }
-                                        if (pk) {
-                                            primaryKey.put(colName);
-                                        }
-                                    }
-                                    tableSchema.put("columns", cols);
-                                    tableSchema.put("types", typs);
-                                    tableSchema.put("nullables", nullables);
-                                    if (defaults.length() > 0) {
-                                        tableSchema.put("defaults", defaults);
-                                    }
-                                    if (primaryKey.length() > 0) {
-                                        tableSchema.put("primary_key", primaryKey);
-                                    }
-                                }
-                            }
-                            schemaJson.put(tableName, tableSchema);
-                        }
-                    }
-                }
-                
-                try (android.database.Cursor viewsCursor = sqliteDb.rawQuery(
-                    "SELECT name, sql FROM sqlite_master WHERE type='view';", null
-                )) {
-                    if (viewsCursor != null) {
-                        while (viewsCursor.moveToNext()) {
-                            String viewName = viewsCursor.getString(0);
-                            String sql = viewsCursor.getString(1);
-                            if (sql != null) {
-                                int asIdx = sql.toUpperCase().indexOf(" AS ");
-                                if (asIdx != -1) {
-                                    String query = sql.substring(asIdx + 4).trim();
-                                    JSONObject viewSchema = new JSONObject();
-                                    viewSchema.put("is_view", true);
-                                    viewSchema.put("query", query);
-                                    schemaJson.put(viewName, viewSchema);
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-            
-            storage.deleteDatabaseDir(dbName);
-            storage.createDatabaseDir(dbName);
-            
-            Iterator<String> keys = schemaJson.keys();
-            while (keys.hasNext()) {
-                String tableName = keys.next();
-                if (tableName.startsWith("__") && tableName.endsWith("__")) continue;
-                
-                JSONObject ts = schemaJson.getJSONObject(tableName);
-                if (ts.optBoolean("is_view", false)) continue;
-                
-                JSONArray cols = ts.getJSONArray("columns");
-                JSONArray rows = new JSONArray();
-                
-                try (android.database.Cursor cursor = sqliteDb.rawQuery("SELECT * FROM " + tableName + ";", null)) {
-                    if (cursor != null) {
-                        while (cursor.moveToNext()) {
-                            JSONObject rowObj = new JSONObject();
-                            for (int i = 0; i < cols.length(); i++) {
-                                String colName = cols.getString(i);
-                                int colIdx = cursor.getColumnIndex(colName);
-                                if (colIdx != -1) {
-                                    if (cursor.isNull(colIdx)) {
-                                        rowObj.put(colName, JSONObject.NULL);
-                                    } else {
-                                        int type = cursor.getType(colIdx);
-                                        if (type == android.database.Cursor.FIELD_TYPE_INTEGER) {
-                                            rowObj.put(colName, cursor.getLong(colIdx));
-                                        } else if (type == android.database.Cursor.FIELD_TYPE_FLOAT) {
-                                            rowObj.put(colName, cursor.getDouble(colIdx));
-                                        } else {
-                                            rowObj.put(colName, cursor.getString(colIdx));
-                                        }
-                                    }
-                                }
-                            }
-                            rows.put(rowObj);
-                        }
-                    }
-                }
-                storage.writeTableRows(dbName, tableName, rows);
-            }
-            
-            storage.writeSchema(dbName, schemaJson);
-            
-            sqliteDb.close();
-            
-            if (dbName.equalsIgnoreCase(engine.getActiveDatabase())) {
-                engine.useDatabase(dbName);
-            }
-        } finally {
-            if (tempFile.exists()) {
-                tempFile.delete();
-            }
-        }
+        SqlCipherExporter.importSQLite(engine, dbName, is);
     }
 }

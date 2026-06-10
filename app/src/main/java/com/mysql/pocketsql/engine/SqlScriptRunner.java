@@ -68,8 +68,8 @@ public class SqlScriptRunner {
                     if (!cleanSql.isEmpty()) {
                         QueryResult res = engine.execute(cleanSql);
                         if (!res.success) {
-                            System.err.println("SQL Script Error on statement: " + cleanSql);
-                            System.err.println("Message: " + res.message);
+                            SqlLog.err("SQL Script Error on statement: " + cleanSql);
+                            SqlLog.err("Message: " + res.message);
                         }
                     }
                     statementBuilder.setLength(0);
@@ -85,8 +85,8 @@ public class SqlScriptRunner {
                 if (!remaining.isEmpty()) {
                     QueryResult res = engine.execute(remaining);
                     if (!res.success) {
-                        System.err.println("SQL Script Error on remaining statement: " + remaining);
-                        System.err.println("Message: " + res.message);
+                        SqlLog.err("SQL Script Error on remaining statement: " + remaining);
+                        SqlLog.err("Message: " + res.message);
                     }
                 }
             }

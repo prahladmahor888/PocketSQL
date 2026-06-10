@@ -35,6 +35,66 @@ public class SecurityUnitTest {
     }
 
     @Test
+    public void testLegacyCbcFallback() throws Exception {
+        String original = "Legacy Data Encrypted with CBC";
+        byte[] key = {
+            0x50, 0x6f, 0x63, 0x6b, 0x65, 0x74, 0x53, 0x51,
+            0x4c, 0x53, 0x65, 0x63, 0x75, 0x72, 0x65, 0x4b
+        };
+        byte[] iv = {
+            0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08,
+            0x09, 0x0a, 0x0b, 0x0c, 0x0d, 0x0e, 0x0f, 0x10
+        };
+        
+        javax.crypto.spec.SecretKeySpec keySpec = new javax.crypto.spec.SecretKeySpec(key, "AES");
+        javax.crypto.spec.IvParameterSpec ivSpec = new javax.crypto.spec.IvParameterSpec(iv);
+        javax.crypto.Cipher cipher = javax.crypto.Cipher.getInstance("AES/CBC/PKCS5Padding");
+        cipher.init(javax.crypto.Cipher.ENCRYPT_MODE, keySpec, ivSpec);
+        byte[] encryptedBytes = cipher.doFinal(original.getBytes(StandardCharsets.UTF_8));
+        String legacyEncrypted = java.util.Base64.getEncoder().encodeToString(encryptedBytes);
+        
+        String decrypted = SecurityHelper.decrypt(legacyEncrypted);
+        assertEquals(original, decrypted);
+    }
+
+    @Test
+    public void testArgon2idHashing() throws Exception {
+        String password = "SuperSecretPassword123!";
+        String phcHash = SecurityHelper.hashPassword(password);
+        
+        // PHC string checks
+        assertTrue(phcHash.startsWith("$argon2id$"));
+        assertTrue(phcHash.contains("m=65536,t=3,p=4"));
+        
+        // Positive verification
+        assertTrue(SecurityHelper.verifyPassword(password, phcHash));
+        
+        // Negative verification
+        assertFalse(SecurityHelper.verifyPassword("WrongPassword", phcHash));
+    }
+
+    @Test
+    public void testPasswordVerificationFallback() throws Exception {
+        String password = "LegacyPassword123";
+        
+        // Test plaintext verification fallback
+        assertTrue(SecurityHelper.verifyPassword(password, password));
+        
+        // Test legacy SHA-256 hash verification fallback
+        java.security.MessageDigest md = java.security.MessageDigest.getInstance("SHA-256");
+        byte[] digest = md.digest(password.getBytes(StandardCharsets.UTF_8));
+        StringBuilder sb = new StringBuilder();
+        for (byte b : digest) {
+            sb.append(String.format("%02x", b));
+        }
+        String legacyHash = sb.toString();
+        assertTrue(SecurityHelper.verifyPassword(password, legacyHash));
+        
+        // Verify mismatch fails
+        assertFalse(SecurityHelper.verifyPassword("WrongPassword", legacyHash));
+    }
+
+    @Test
     public void testStorageEngineEncryption() throws Exception {
         File baseDir = tempFolder.newFolder("pocketsql_base");
         StorageEngine storageEngine = new StorageEngine(baseDir);

@@ -64,7 +64,8 @@ public class SqlApiService extends Service {
         String ip = com.mysql.pocketsql.engine.SqlApiHelper.getLocalIpAddress();
         int activePort = com.mysql.pocketsql.engine.SqlApiHelper.getApiServer().getActivePort();
         String bindError = com.mysql.pocketsql.engine.SqlApiHelper.getApiServer().getBindErrorMessage();
-        String content = (bindError != null) ? "API Server bind failed: " + bindError : "API Server running on: http://" + ip + ":" + activePort + "/api/query";
+        String protocol = com.mysql.pocketsql.engine.SqlApiHelper.getApiServer().isTlsEnabled() ? "https://" : "http://";
+        String content = (bindError != null) ? "API Server bind failed: " + bindError : "API Server running on: " + protocol + ip + ":" + activePort + "/api/query";
 
         Notification notification = new NotificationCompat.Builder(this, CHANNEL_ID)
                 .setContentTitle("PocketSQL API Server")
@@ -87,7 +88,7 @@ public class SqlApiService extends Service {
         try {
             SqlApiHelper.getApiServer().stop();
         } catch (Exception e) {
-            e.printStackTrace();
+            com.mysql.pocketsql.engine.SqlLog.printStackTrace(e);
         }
     }
 

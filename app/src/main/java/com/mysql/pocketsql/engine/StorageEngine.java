@@ -170,20 +170,11 @@ public class StorageEngine {
             }
         }
         String content = sb.toString();
-        try {
-            return SecurityHelper.decrypt(content);
-        } catch (Exception e) {
-            return content;
-        }
+        return SecurityHelper.decrypt(content);
     }
 
     private void writeFileContent(File file, String content) throws Exception {
-        String encryptedContent;
-        try {
-            encryptedContent = SecurityHelper.encrypt(content);
-        } catch (Exception e) {
-            encryptedContent = content;
-        }
+        String encryptedContent = SecurityHelper.encrypt(content);
         try (FileOutputStream fos = new FileOutputStream(file);
              OutputStreamWriter osw = new OutputStreamWriter(fos, StandardCharsets.UTF_8);
              BufferedWriter writer = new BufferedWriter(osw)) {

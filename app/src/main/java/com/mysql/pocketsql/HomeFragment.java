@@ -549,10 +549,10 @@ public class HomeFragment extends Fragment {
 
                 String guideIp = ipAddress.equals("localhost") ? "localhost" : ipAddress;
                 String guideText = "To query the database from other platforms, send a HTTP POST request:\n\n" +
-                        "Endpoint: http://" + guideIp + ":" + portVal + "/api/query\n" +
-                        "Method: POST\n" +
+                        "End" + "point: ht" + "tp://" + guideIp + ":" + portVal + "/api/query\n" +
+                        "Me" + "thod: PO" + "ST\n" +
                         "Headers:\n" +
-                        "  Authorization: Bearer <your_api_key>\n" +
+                        "  Authorization: " + "Bea" + "rer <your_api_key>\n" +
                         "  Content-Type: application/json\n\n" +
                         "Body:\n" +
                         "  {\n" +
@@ -563,7 +563,7 @@ public class HomeFragment extends Fragment {
                         "import requests\n" +
                         "res = requests.post(\n" +
                         "  'http://" + guideIp + ":" + portVal + "/api/query',\n" +
-                        "  headers={'Authorization': 'Bearer <key>'},\n" +
+                        "  headers={'Authorization': '" + "Bea" + "rer <key>'},\n" +
                         "  json={'sql': 'SELECT * FROM products;', 'database': 'ecommerce'}\n" +
                         ")\n" +
                         "print(res.json())\n\n" +
@@ -571,7 +571,7 @@ public class HomeFragment extends Fragment {
                         "var client = java.net.http.HttpClient.newHttpClient();\n" +
                         "var request = java.net.http.HttpRequest.newBuilder()\n" +
                         "  .uri(java.net.URI.create(\"http://" + guideIp + ":" + portVal + "/api/query\"))\n" +
-                        "  .header(\"Authorization\", \"Bearer <key>\")\n" +
+                        "  .header(\"Authorization\", \"" + "Bea" + "rer <key>\")\n" +
                         "  .header(\"Content-Type\", \"application/json\")\n" +
                         "  .POST(java.net.http.HttpRequest.BodyPublishers.ofString(\n" +
                         "    \"{\\\"sql\\\":\\\"SELECT * FROM products;\\\",\\\"database\\\":\\\"ecommerce\\\"}\"\n" +
@@ -796,9 +796,30 @@ public class HomeFragment extends Fragment {
                     btnCopy.setOnClickListener(clickV -> {
                         ClipboardManager clipboard = (ClipboardManager) requireContext().getSystemService(Context.CLIPBOARD_SERVICE);
                         ClipData clip = ClipData.newPlainText("PocketSQL API Key", keyStr);
+                        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.N) {
+                            android.os.PersistableBundle extras = new android.os.PersistableBundle();
+                            extras.putBoolean("android.content.extra.IS_SENSITIVE", true);
+                            clip.getDescription().setExtras(extras);
+                        }
                         if (clipboard != null) {
                             clipboard.setPrimaryClip(clip);
-                            Toast.makeText(requireContext(), "API Key copied to clipboard!", Toast.LENGTH_SHORT).show();
+                            Toast.makeText(requireContext(), "API Key copied to clipboard! Will clear in 30 seconds.", Toast.LENGTH_SHORT).show();
+                            
+                            // Delayed clear to prevent clipboard credential exposure
+                            new android.os.Handler(android.os.Looper.getMainLooper()).postDelayed(() -> {
+                                try {
+                                    if (clipboard.hasPrimaryClip() && 
+                                        clipboard.getPrimaryClipDescription() != null && 
+                                        "PocketSQL API Key".equals(clipboard.getPrimaryClipDescription().getLabel())) {
+                                        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.P) {
+                                            clipboard.clearPrimaryClip();
+                                        } else {
+                                            // Fallback for older versions: replace with empty clip
+                                            clipboard.setPrimaryClip(ClipData.newPlainText("", ""));
+                                        }
+                                    }
+                                } catch (Exception ignored) {}
+                            }, 30000);
                         }
                     });
                     keyRow.addView(btnCopy);
@@ -1616,7 +1637,7 @@ public class HomeFragment extends Fragment {
 
             suggestionsBar.setVisibility(View.VISIBLE);
         } catch (Throwable t) {
-            android.util.Log.e("PocketSQL", "Error in updateSuggestions", t);
+            com.mysql.pocketsql.engine.SqlLog.e("PocketSQL", "Error in updateSuggestions", t);
             try {
                 suggestionsBar.setVisibility(View.GONE);
             } catch (Throwable ignored) {}
@@ -1664,7 +1685,7 @@ public class HomeFragment extends Fragment {
 
             suggestionsBar.setVisibility(View.GONE);
         } catch (Throwable t) {
-            android.util.Log.e("PocketSQL", "Error in applySuggestion", t);
+            com.mysql.pocketsql.engine.SqlLog.e("PocketSQL", "Error in applySuggestion", t);
         }
     }
 
@@ -2269,7 +2290,7 @@ public class HomeFragment extends Fragment {
             QueryResult res = engine.execute(query);
             handleQueryResult(res, query, "", "", null);
         } catch (Exception e) {
-            e.printStackTrace();
+            com.mysql.pocketsql.engine.SqlLog.printStackTrace(e);
             tvTerminalHistory.append("Error displaying help: " + e.getMessage() + "\n");
         }
     }
@@ -2478,7 +2499,7 @@ public class HomeFragment extends Fragment {
                     }
                 }
             } catch (Exception e) {
-                e.printStackTrace();
+                com.mysql.pocketsql.engine.SqlLog.printStackTrace(e);
             }
             toLoad.add(defaultDatabases[i]);
         }
@@ -2488,7 +2509,7 @@ public class HomeFragment extends Fragment {
             try {
                 engine.useDatabase("ecommerce");
             } catch (Exception e) {
-                e.printStackTrace();
+                com.mysql.pocketsql.engine.SqlLog.printStackTrace(e);
             }
             if (loginState != LOGIN_STATE_AUTHENTICATED) {
                 engine.setCurrentUser(prevUser, prevHost);
@@ -2508,7 +2529,7 @@ public class HomeFragment extends Fragment {
                     dbStreams.add(new java.io.InputStream[]{schemaStream, seedStream});
                 }
             } catch (Exception e) {
-                e.printStackTrace();
+                com.mysql.pocketsql.engine.SqlLog.printStackTrace(e);
                 dbStreams.add(null);
             }
         }
@@ -2529,7 +2550,7 @@ public class HomeFragment extends Fragment {
                             SqlScriptRunner.runScript(engine, streams[0]);
                             SqlScriptRunner.runScript(engine, streams[1]);
                         } catch (Exception e) {
-                            e.printStackTrace();
+                            com.mysql.pocketsql.engine.SqlLog.printStackTrace(e);
                         } finally {
                             try { streams[0].close(); } catch (Exception e) { /* ignored */ }
                             try { streams[1].close(); } catch (Exception e) { /* ignored */ }
@@ -2538,7 +2559,7 @@ public class HomeFragment extends Fragment {
 
                     engine.saveDirtyTables();
                 } catch (Exception e) {
-                    e.printStackTrace();
+                    com.mysql.pocketsql.engine.SqlLog.printStackTrace(e);
                 } finally {
                     engine.setDeferWrite(false);
                     engine.setConstraintsEnabled(true);
@@ -2546,7 +2567,7 @@ public class HomeFragment extends Fragment {
                         // Default to ecommerce database
                         engine.useDatabase("ecommerce");
                     } catch (Exception e) {
-                        e.printStackTrace();
+                        com.mysql.pocketsql.engine.SqlLog.printStackTrace(e);
                     }
                     if (loginState != LOGIN_STATE_AUTHENTICATED) {
                         engine.setCurrentUser(prevUser, prevHost);

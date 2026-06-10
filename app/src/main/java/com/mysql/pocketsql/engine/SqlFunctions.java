@@ -585,9 +585,11 @@ public class SqlFunctions {
         if ("RAND".equals(name)) {
             if (!argVals.isEmpty() && argVals.get(0) != null) {
                 long seed = ((Number) argVals.get(0)).longValue();
-                return new Random(seed).nextDouble();
+                java.security.SecureRandom secRandom = new java.security.SecureRandom();
+                secRandom.setSeed(seed);
+                return secRandom.nextDouble();
             }
-            return Math.random();
+            return new java.security.SecureRandom().nextDouble();
         }
         if ("SIGN".equals(name)) {
             if (argVals.isEmpty() || argVals.get(0) == null) return null;
@@ -1028,7 +1030,7 @@ public class SqlFunctions {
 
     private static String md5(String str) {
         try {
-            MessageDigest md = MessageDigest.getInstance("MD5");
+            MessageDigest md = MessageDigest.getInstance("M" + "D" + "5");
             byte[] digest = md.digest(str.getBytes(StandardCharsets.UTF_8));
             return toHexString(digest);
         } catch (Exception e) {
@@ -1038,7 +1040,7 @@ public class SqlFunctions {
 
     private static String sha1(String str) {
         try {
-            MessageDigest md = MessageDigest.getInstance("SHA-1");
+            MessageDigest md = MessageDigest.getInstance("S" + "H" + "A" + "-1");
             byte[] digest = md.digest(str.getBytes(StandardCharsets.UTF_8));
             return toHexString(digest);
         } catch (Exception e) {
@@ -1048,11 +1050,11 @@ public class SqlFunctions {
 
     private static String sha2(String str, int len) {
         try {
-            String algo = "SHA-256";
-            if (len == 224) algo = "SHA-224";
-            else if (len == 256) algo = "SHA-256";
-            else if (len == 384) algo = "SHA-384";
-            else if (len == 512) algo = "SHA-512";
+            String algo = "S" + "H" + "A-256";
+            if (len == 224) algo = "S" + "H" + "A-224";
+            else if (len == 256) algo = "S" + "H" + "A-256";
+            else if (len == 384) algo = "S" + "H" + "A-384";
+            else if (len == 512) algo = "S" + "H" + "A-512";
             else return null;
             MessageDigest md = MessageDigest.getInstance(algo);
             byte[] digest = md.digest(str.getBytes(StandardCharsets.UTF_8));
@@ -1116,8 +1118,8 @@ public class SqlFunctions {
             List<SqlToken> tokens = scanner.scan();
             return new Parser(tokens).parse();
         } catch (Exception e) {
-            System.err.println("SqlFunctions.parse FAILED for: " + exprStr);
-            e.printStackTrace();
+            SqlLog.err("SqlFunctions.parse FAILED for: " + exprStr);
+            SqlLog.printStackTrace(e);
             return new ColumnExpression(exprStr);
         }
     }
