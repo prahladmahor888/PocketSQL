@@ -6,7 +6,7 @@ import android.graphics.Color;
 
 public class SettingsManager {
 
-    private static final String PREFS_NAME = "pocketsql_settings";
+    private static final String PREFS_NAME = "pocketsql_secure_settings";
 
     // ── Keys ──────────────────────────────────────────────────────────────────
     public static final String KEY_THEME         = "theme";
@@ -36,10 +36,22 @@ public class SettingsManager {
 
     // ─────────────────────────────────────────────────────────────────────────
 
-    private final SharedPreferences prefs;
+    private SharedPreferences prefs;
 
     public SettingsManager(Context context) {
-        prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE);
+        try {
+            String masterKeyAlias = androidx.security.crypto.MasterKeys.getOrCreate(androidx.security.crypto.MasterKeys.AES256_GCM_SPEC);
+            prefs = androidx.security.crypto.EncryptedSharedPreferences.create(
+                PREFS_NAME,
+                masterKeyAlias,
+                context,
+                androidx.security.crypto.EncryptedSharedPreferences.PrefKeyEncryptionScheme.AES256_SIV,
+                androidx.security.crypto.EncryptedSharedPreferences.PrefValueEncryptionScheme.AES256_GCM
+            );
+        } catch (Exception e) {
+            // Fallback to standard SharedPreferences if KeyStore is not available (e.g., in JVM tests or legacy devices)
+            prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE);
+        }
     }
 
     // ── Theme ─────────────────────────────────────────────────────────────────
@@ -179,11 +191,26 @@ public class SettingsManager {
     }
 
     public String getLastPassword() {
-        return prefs.getString("last_password", "");
+        String encrypted = prefs.getString("last_password", "");
+        if (encrypted.isEmpty()) return "";
+        try {
+            return com.mysql.pocketsql.engine.SecurityHelper.decrypt(encrypted);
+        } catch (Exception e) {
+            return "";
+        }
     }
 
     public void setLastPassword(String password) {
-        prefs.edit().putString("last_password", password).apply();
+        if (password == null || password.isEmpty()) {
+            prefs.edit().putString("last_password", "").apply();
+            return;
+        }
+        try {
+            String encrypted = com.mysql.pocketsql.engine.SecurityHelper.encrypt(password);
+            prefs.edit().putString("last_password", encrypted).apply();
+        } catch (Exception e) {
+            prefs.edit().putString("last_password", password).apply();
+        }
     }
 
     public boolean isAutoLogin() {

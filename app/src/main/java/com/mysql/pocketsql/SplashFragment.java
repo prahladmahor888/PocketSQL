@@ -14,12 +14,19 @@ import androidx.fragment.app.Fragment;
 public class SplashFragment extends Fragment {
 
     private final Handler handler = new Handler(Looper.getMainLooper());
-    private final Runnable navigateRunnable = () -> {
-        if (isAdded()) {
-            requireActivity().getSupportFragmentManager()
-                    .beginTransaction()
-                    .replace(R.id.main_container, new HomeFragment())
-                    .commit();
+    private final Runnable navigateRunnable = new Runnable() {
+        @Override
+        public void run() {
+            if (isAdded()) {
+                if (com.mysql.pocketsql.engine.SqlApiHelper.isDefaultDbReady()) {
+                    requireActivity().getSupportFragmentManager()
+                            .beginTransaction()
+                            .replace(R.id.main_container, new HomeFragment())
+                            .commit();
+                } else {
+                    handler.postDelayed(this, 200);
+                }
+            }
         }
     };
 

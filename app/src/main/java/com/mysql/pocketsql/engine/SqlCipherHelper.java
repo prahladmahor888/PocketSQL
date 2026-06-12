@@ -8,7 +8,7 @@ import net.zetetic.database.sqlcipher.SQLiteDatabase;
 
 public class SqlCipherHelper {
     private static boolean libsLoaded = false;
-    private static String cachedPassphrase = null;
+    private static String cachedPw = null;
 
     public static synchronized void init(Context context) {
         if (!libsLoaded) {
@@ -17,39 +17,39 @@ public class SqlCipherHelper {
         }
     }
 
-    public static synchronized String getOrGeneratePassphrase(Context context) {
-        if (cachedPassphrase != null) {
-            return cachedPassphrase;
+    public static synchronized String getOrGeneratePw(Context context) {
+        if (cachedPw != null) {
+            return cachedPw;
         }
         File keyFile = new File(context.getFilesDir(), "sqlcipher_key.enc");
         if (keyFile.exists()) {
             try {
                 byte[] encoded = java.nio.file.Files.readAllBytes(keyFile.toPath());
                 String encrypted = new String(encoded, java.nio.charset.StandardCharsets.UTF_8);
-                cachedPassphrase = SecurityHelper.decrypt(encrypted);
-                return cachedPassphrase;
+                cachedPw = SecurityHelper.decrypt(encrypted);
+                return cachedPw;
             } catch (Exception e) {
                 // Ignore and fall through to generate
             }
         }
-        // Generate new random passphrase
+        // Generate new random pw
         byte[] bytes = new byte[32];
         new SecureRandom().nextBytes(bytes);
-        cachedPassphrase = Base64.getEncoder().encodeToString(bytes);
+        cachedPw = Base64.getEncoder().encodeToString(bytes);
         try {
-            String encrypted = SecurityHelper.encrypt(cachedPassphrase);
+            String encrypted = SecurityHelper.encrypt(cachedPw);
             java.nio.file.Files.write(keyFile.toPath(), encrypted.getBytes(java.nio.charset.StandardCharsets.UTF_8));
         } catch (Exception e) {
             SqlLog.printStackTrace(e);
         }
-        return cachedPassphrase;
+        return cachedPw;
     }
 
-    public static SQLiteDatabase openOrCreateDatabase(File file, String passphrase) {
-        return SQLiteDatabase.openOrCreateDatabase(file.getAbsolutePath(), passphrase, null, null);
+    public static SQLiteDatabase openOrCreateDatabase(File file, String pw) {
+        return SQLiteDatabase.openOrCreateDatabase(file.getAbsolutePath(), pw, null, null);
     }
 
-    public static SQLiteDatabase openDatabase(String path, String passphrase) {
-        return SQLiteDatabase.openDatabase(path, passphrase, null, SQLiteDatabase.OPEN_READONLY, null);
+    public static SQLiteDatabase openDatabase(String path, String pw) {
+        return SQLiteDatabase.openDatabase(path, pw, null, SQLiteDatabase.OPEN_READONLY, null);
     }
 }

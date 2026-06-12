@@ -12,6 +12,11 @@ public class SqlApiHelper {
     private static DatabaseEngine engine;
     private static SqlApiKeyManager apiKeyManager;
     private static SqlApiServer apiServer;
+    private static volatile boolean isDefaultDbReady = false;
+
+    public static boolean isDefaultDbReady() {
+        return isDefaultDbReady;
+    }
 
     public static Context getContext() {
         return context;
@@ -34,7 +39,93 @@ public class SqlApiHelper {
             apiKeyManager = new SqlApiKeyManager(pocketsqlDir);
             apiKeyManager.initializeDefaultKey();
             apiServer = new SqlApiServer(engine, apiKeyManager);
+
+            checkAndInitializeDefaultDatabases();
         }
+    }
+
+    private static void checkAndInitializeDefaultDatabases() {
+        if (!engine.hasUsersConfigured()) {
+            engine.initializeDefaultRootUser();
+        }
+
+        final String[] defaultDatabases = {"banking", "ecommerce", "school", "social"};
+        final String[] checkTables = {"customers", "users", "students", "users"};
+
+        final List<String> toLoad = new java.util.ArrayList<>();
+        for (int i = 0; i < defaultDatabases.length; i++) {
+            try {
+                if (engine.getStorageEngine().databaseExists(defaultDatabases[i])) {
+                    org.json.JSONObject schema = engine.getStorageEngine().readSchema(defaultDatabases[i]);
+                    if (schema.has(checkTables[i])) {
+                        continue; // Already loaded
+                    }
+                }
+            } catch (Exception e) {
+                SqlLog.printStackTrace(e);
+            }
+            toLoad.add(defaultDatabases[i]);
+        }
+
+        if (toLoad.isEmpty()) {
+            try {
+                engine.useDatabase("ecommerce");
+            } catch (Exception e) {
+                SqlLog.printStackTrace(e);
+            }
+            isDefaultDbReady = true;
+            return;
+        }
+
+        isDefaultDbReady = false;
+
+        new Thread(new Runnable() {
+            @Override
+            public void run() {
+                final String prevUser = engine.getCurrentUser();
+                final String prevHost = engine.getCurrentHost();
+                engine.setCurrentUser("root", "localhost");
+
+                try {
+                    engine.setDeferWrite(true);
+                    engine.setConstraintsEnabled(false);
+
+                    for (String dbName : toLoad) {
+                        java.io.InputStream schemaStream = null;
+                        java.io.InputStream seedStream = null;
+                        try {
+                            schemaStream = context.getAssets().open("databases/" + dbName + "/schema.sql");
+                            seedStream = context.getAssets().open("databases/" + dbName + "/seed.sql");
+                            SqlScriptRunner.runScript(engine, schemaStream);
+                            SqlScriptRunner.runScript(engine, seedStream);
+                        } catch (Exception e) {
+                            SqlLog.printStackTrace(e);
+                        } finally {
+                            if (schemaStream != null) {
+                                try { schemaStream.close(); } catch (Exception ignored) {}
+                            }
+                            if (seedStream != null) {
+                                try { seedStream.close(); } catch (Exception ignored) {}
+                            }
+                        }
+                    }
+
+                    engine.saveDirtyTables();
+                } catch (Exception e) {
+                    SqlLog.printStackTrace(e);
+                } finally {
+                    engine.setDeferWrite(false);
+                    engine.setConstraintsEnabled(true);
+                    try {
+                        engine.useDatabase("ecommerce");
+                    } catch (Exception e) {
+                        SqlLog.printStackTrace(e);
+                    }
+                    engine.setCurrentUser(prevUser, prevHost);
+                    isDefaultDbReady = true;
+                }
+            }
+        }).start();
     }
 
     private static void encryptExistingPlaintextFiles(File directory) {
@@ -70,9 +161,8 @@ public class SqlApiHelper {
         String content = sb.toString().trim();
         if (content.isEmpty()) return;
         
-        try {
-            SecurityHelper.decrypt(content);
-        } catch (Exception e) {
+        // Only encrypt if content is plaintext JSON (starts with '{' or '[')
+        if (content.startsWith("{") || content.startsWith("[")) {
             String encrypted = SecurityHelper.encrypt(content);
             try (java.io.FileOutputStream fos = new java.io.FileOutputStream(file);
                  java.io.OutputStreamWriter osw = new java.io.OutputStreamWriter(fos, java.nio.charset.StandardCharsets.UTF_8);

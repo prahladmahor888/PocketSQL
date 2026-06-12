@@ -83,8 +83,14 @@ public class StorageEngine {
         if (!schemaFile.exists()) {
             return new JSONObject();
         }
-        String content = readFileContent(schemaFile);
-        return new JSONObject(content);
+        try {
+            String content = readFileContent(schemaFile);
+            return new JSONObject(content);
+        } catch (Exception e) {
+            SqlLog.err("Failed to read schema for " + dbName + ": " + e.getMessage() + ". Deleting corrupt database.");
+            deleteDatabaseDir(dbName);
+            return new JSONObject();
+        }
     }
 
     public void writeSchema(String dbName, JSONObject schemaJson) throws Exception {
@@ -101,8 +107,14 @@ public class StorageEngine {
         if (!tableFile.exists()) {
             return new JSONArray();
         }
-        String content = readFileContent(tableFile);
-        return new JSONArray(content);
+        try {
+            String content = readFileContent(tableFile);
+            return new JSONArray(content);
+        } catch (Exception e) {
+            SqlLog.err("Failed to read table rows for " + dbName + "." + tableName + ": " + e.getMessage() + ". Deleting corrupt table file.");
+            tableFile.delete();
+            return new JSONArray();
+        }
     }
 
     public void writeTableRows(String dbName, String tableName, JSONArray rowsJson) throws Exception {
@@ -191,8 +203,14 @@ public class StorageEngine {
         if (!usersFile.exists()) {
             return new JSONObject();
         }
-        String content = readFileContent(usersFile);
-        return new JSONObject(content);
+        try {
+            String content = readFileContent(usersFile);
+            return new JSONObject(content);
+        } catch (Exception e) {
+            SqlLog.err("Failed to read users.json: " + e.getMessage() + ". Deleting corrupt file.");
+            usersFile.delete();
+            return new JSONObject();
+        }
     }
 
     public void writeUsers(JSONObject usersJson) throws Exception {

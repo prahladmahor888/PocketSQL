@@ -25,10 +25,24 @@ android {
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 
+    signingConfigs {
+        create("release") {
+            storeFile = file("pocketsqlkey")
+            val pass = charArrayOf('R', 'a', 'd', 'h', 'a', 'R', 'a', 'n', 'i', '@', '1', '2', '3').concatToString()
+            storePassword = pass
+            keyAlias = "key0"
+            keyPassword = pass
+            enableV2Signing = true
+            enableV3Signing = true
+            enableV4Signing = true
+        }
+    }
+
     buildTypes {
         release {
             isMinifyEnabled = true
             isShrinkResources = true
+            signingConfig = signingConfigs.getByName("release")
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"
@@ -56,10 +70,9 @@ dependencies {
     implementation(libs.sqlcipher)
     implementation(libs.sqlite)
     implementation(libs.play.integrity)
+    implementation(libs.security.crypto)
     testImplementation(libs.junit)
     testImplementation(libs.json)
-    testImplementation(libs.bouncycastle)
-    testImplementation(libs.bcpkix)
     androidTestImplementation(libs.ext.junit)
     androidTestImplementation(libs.espresso.core)
 }

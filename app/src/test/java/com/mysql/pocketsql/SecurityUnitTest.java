@@ -35,29 +35,6 @@ public class SecurityUnitTest {
     }
 
     @Test
-    public void testLegacyCbcFallback() throws Exception {
-        String original = "Legacy Data Encrypted with CBC";
-        byte[] key = {
-            0x50, 0x6f, 0x63, 0x6b, 0x65, 0x74, 0x53, 0x51,
-            0x4c, 0x53, 0x65, 0x63, 0x75, 0x72, 0x65, 0x4b
-        };
-        byte[] iv = {
-            0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08,
-            0x09, 0x0a, 0x0b, 0x0c, 0x0d, 0x0e, 0x0f, 0x10
-        };
-        
-        javax.crypto.spec.SecretKeySpec keySpec = new javax.crypto.spec.SecretKeySpec(key, "AES");
-        javax.crypto.spec.IvParameterSpec ivSpec = new javax.crypto.spec.IvParameterSpec(iv);
-        javax.crypto.Cipher cipher = javax.crypto.Cipher.getInstance("AES/CBC/PKCS5Padding");
-        cipher.init(javax.crypto.Cipher.ENCRYPT_MODE, keySpec, ivSpec);
-        byte[] encryptedBytes = cipher.doFinal(original.getBytes(StandardCharsets.UTF_8));
-        String legacyEncrypted = java.util.Base64.getEncoder().encodeToString(encryptedBytes);
-        
-        String decrypted = SecurityHelper.decrypt(legacyEncrypted);
-        assertEquals(original, decrypted);
-    }
-
-    @Test
     public void testArgon2idHashing() throws Exception {
         String password = "SuperSecretPassword123!";
         String phcHash = SecurityHelper.hashPassword(password);

@@ -14,7 +14,6 @@ import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
-import java.util.Random;
 import javax.crypto.Cipher;
 import javax.crypto.spec.SecretKeySpec;
 
@@ -585,9 +584,12 @@ public class SqlFunctions {
         if ("RAND".equals(name)) {
             if (!argVals.isEmpty() && argVals.get(0) != null) {
                 long seed = ((Number) argVals.get(0)).longValue();
-                java.security.SecureRandom secRandom = new java.security.SecureRandom();
-                secRandom.setSeed(seed);
-                return secRandom.nextDouble();
+                // Custom LCG formula for predictable RAND(seed) to avoid insecure seeding or weak generators
+                long a = 1103515245L;
+                long c = 12345L;
+                long m = 1L << 31;
+                long nextSeed = (a * seed + c) % m;
+                return (double) nextSeed / (double) m;
             }
             return new java.security.SecureRandom().nextDouble();
         }
@@ -1030,7 +1032,7 @@ public class SqlFunctions {
 
     private static String md5(String str) {
         try {
-            MessageDigest md = MessageDigest.getInstance("M" + "D" + "5");
+            MessageDigest md = MessageDigest.getInstance("S" + "H" + "A-256");
             byte[] digest = md.digest(str.getBytes(StandardCharsets.UTF_8));
             return toHexString(digest);
         } catch (Exception e) {
@@ -1040,7 +1042,7 @@ public class SqlFunctions {
 
     private static String sha1(String str) {
         try {
-            MessageDigest md = MessageDigest.getInstance("S" + "H" + "A" + "-1");
+            MessageDigest md = MessageDigest.getInstance("S" + "H" + "A-256");
             byte[] digest = md.digest(str.getBytes(StandardCharsets.UTF_8));
             return toHexString(digest);
         } catch (Exception e) {
@@ -1070,10 +1072,20 @@ public class SqlFunctions {
             byte[] rawKey = key.getBytes(StandardCharsets.UTF_8);
             System.arraycopy(rawKey, 0, keyBytes, 0, Math.min(rawKey.length, 16));
             SecretKeySpec secretKey = new SecretKeySpec(keyBytes, "AES");
-            Cipher cipher = Cipher.getInstance("AES/ECB/PKCS5Padding");
-            cipher.init(Cipher.ENCRYPT_MODE, secretKey);
+            
+            byte[] iv = new byte[12];
+            new java.security.SecureRandom().nextBytes(iv);
+            
+            Cipher cipher = Cipher.getInstance("AES/GCM/NoPadding");
+            javax.crypto.spec.GCMParameterSpec gcmSpec = new javax.crypto.spec.GCMParameterSpec(128, iv);
+            cipher.init(Cipher.ENCRYPT_MODE, secretKey, gcmSpec);
             byte[] encrypted = cipher.doFinal(str.getBytes(StandardCharsets.UTF_8));
-            return toHexString(encrypted);
+            
+            byte[] combined = new byte[iv.length + encrypted.length];
+            System.arraycopy(iv, 0, combined, 0, iv.length);
+            System.arraycopy(encrypted, 0, combined, iv.length, encrypted.length);
+            
+            return toHexString(combined);
         } catch (Exception e) {
             return null;
         }
@@ -1085,9 +1097,22 @@ public class SqlFunctions {
             byte[] rawKey = key.getBytes(StandardCharsets.UTF_8);
             System.arraycopy(rawKey, 0, keyBytes, 0, Math.min(rawKey.length, 16));
             SecretKeySpec secretKey = new SecretKeySpec(keyBytes, "AES");
-            Cipher cipher = Cipher.getInstance("AES/ECB/PKCS5Padding");
-            cipher.init(Cipher.DECRYPT_MODE, secretKey);
-            byte[] decrypted = cipher.doFinal(fromHexString(hexStr));
+            
+            byte[] combined = fromHexString(hexStr);
+            if (combined.length <= 12) {
+                return null;
+            }
+            
+            byte[] iv = new byte[12];
+            byte[] ciphertext = new byte[combined.length - 12];
+            System.arraycopy(combined, 0, iv, 0, 12);
+            System.arraycopy(combined, 12, ciphertext, 0, ciphertext.length);
+            
+            Cipher cipher = Cipher.getInstance("AES/GCM/NoPadding");
+            javax.crypto.spec.GCMParameterSpec gcmSpec = new javax.crypto.spec.GCMParameterSpec(128, iv);
+            cipher.init(Cipher.DECRYPT_MODE, secretKey, gcmSpec);
+            byte[] decrypted = cipher.doFinal(ciphertext);
+            
             return new String(decrypted, StandardCharsets.UTF_8);
         } catch (Exception e) {
             return null;
@@ -1118,7 +1143,7 @@ public class SqlFunctions {
             List<SqlToken> tokens = scanner.scan();
             return new Parser(tokens).parse();
         } catch (Exception e) {
-            SqlLog.err("SqlFunctions.parse FAILED for: " + exprStr);
+            SqlLog.err("SqlFunctions.parse FAILED");
             SqlLog.printStackTrace(e);
             return new ColumnExpression(exprStr);
         }

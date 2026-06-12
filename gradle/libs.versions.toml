@@ -26,6 +26,7 @@ bcpkix = { group = "org.bouncycastle", name = "bcpkix-jdk18on", version.ref = "b
 sqlcipher = { group = "net.zetetic", name = "sqlcipher-android", version.ref = "sqlcipher" }
 sqlite = { group = "androidx.sqlite", name = "sqlite", version = "2.4.0" }
 play-integrity = { group = "com.google.android.play", name = "integrity", version.ref = "playIntegrity" }
+security-crypto = { group = "androidx.security", name = "security-crypto", version = "1.0.0" }
 
 [plugins]
 android-application = { id = "com.android.application", version.ref = "agp" }

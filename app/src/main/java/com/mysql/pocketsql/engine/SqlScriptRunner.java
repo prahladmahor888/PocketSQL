@@ -68,7 +68,7 @@ public class SqlScriptRunner {
                     if (!cleanSql.isEmpty()) {
                         QueryResult res = engine.execute(cleanSql);
                         if (!res.success) {
-                            SqlLog.err("SQL Script Error on statement: " + cleanSql);
+                            SqlLog.err("SQL Script Error on statement");
                             SqlLog.err("Message: " + res.message);
                         }
                     }
@@ -85,7 +85,7 @@ public class SqlScriptRunner {
                 if (!remaining.isEmpty()) {
                     QueryResult res = engine.execute(remaining);
                     if (!res.success) {
-                        SqlLog.err("SQL Script Error on remaining statement: " + remaining);
+                        SqlLog.err("SQL Script Error on remaining statement");
                         SqlLog.err("Message: " + res.message);
                     }
                 }

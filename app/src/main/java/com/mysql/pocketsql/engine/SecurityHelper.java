@@ -13,30 +13,22 @@ import org.bouncycastle.crypto.params.Argon2Parameters;
 
 public class SecurityHelper {
 
-    // A 128-bit key (16 bytes) used only for legacy CBC fallback
-    private static final byte[] KEY = {
-        0x50, 0x6f, 0x63, 0x6b, 0x65, 0x74, 0x53, 0x51, // "PocketSQ"
-        0x4c, 0x53, 0x65, 0x63, 0x75, 0x72, 0x65, 0x4b  // "LSecureK"
-    };
-
-    // A standard IV (16 bytes) used only for legacy CBC fallback decryption
-    private static final byte[] LEGACY_IV = {
-        0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08,
-        0x09, 0x0a, 0x0b, 0x0c, 0x0d, 0x0e, 0x0f, 0x10
-    };
-
     private static final int GCM_IV_LENGTH = 12;
     private static final int GCM_TAG_LENGTH = 128; // in bits
 
-    private static SecretKey getSecretKey() throws Exception {
+    private static SecretKey jvmKey = null;
+
+    private static synchronized SecretKey getSecretKey() throws Exception {
         if (java.security.Security.getProvider("AndroidKeyStore") != null) {
             return AndroidKeystoreHelper.getOrCreateKey();
         } else {
-            // JVM fallback: generate a 256-bit key deterministically from the 128-bit key
-            byte[] jvmKey = new byte[32];
-            System.arraycopy(KEY, 0, jvmKey, 0, 16);
-            System.arraycopy(KEY, 0, jvmKey, 16, 16);
-            return new SecretKeySpec(jvmKey, "AES");
+            // JVM fallback: generate a 256-bit key dynamically on first use (in-memory caching)
+            if (jvmKey == null) {
+                byte[] keyBytes = new byte[32];
+                new SecureRandom().nextBytes(keyBytes);
+                jvmKey = new SecretKeySpec(keyBytes, "AES");
+            }
+            return jvmKey;
         }
     }
 
@@ -44,18 +36,16 @@ public class SecurityHelper {
         if (plainText == null) return null;
         SecretKey keySpec = getSecretKey();
         
-        // Generate random 12-byte IV for GCM
-        byte[] iv = new byte[GCM_IV_LENGTH];
-        SecureRandom secureRandom = new SecureRandom();
-        secureRandom.nextBytes(iv);
-        
         Cipher cipher = Cipher.getInstance("AES/GCM/NoPadding");
-        GCMParameterSpec gcmSpec = new GCMParameterSpec(GCM_TAG_LENGTH, iv);
-        cipher.init(Cipher.ENCRYPT_MODE, keySpec, gcmSpec);
+        cipher.init(Cipher.ENCRYPT_MODE, keySpec);
+        byte[] iv = cipher.getIV();
+        if (iv == null || iv.length == 0) {
+            throw new Exception("Encryption failed: generated IV is null or empty");
+        }
         
         byte[] encryptedBytes = cipher.doFinal(plainText.getBytes(StandardCharsets.UTF_8));
         
-        // Combine IV and Ciphertext: [12 bytes IV][Ciphertext...]
+        // Combine IV and Ciphertext: [IV length bytes][Ciphertext...]
         byte[] combined = new byte[iv.length + encryptedBytes.length];
         System.arraycopy(iv, 0, combined, 0, iv.length);
         System.arraycopy(encryptedBytes, 0, combined, iv.length, encryptedBytes.length);
@@ -75,35 +65,20 @@ public class SecurityHelper {
         }
 
         // Try AES-256-GCM Decryption (using KeyStore/JVM Key)
-        try {
-            if (decodedBytes.length > GCM_IV_LENGTH) {
-                byte[] iv = new byte[GCM_IV_LENGTH];
-                byte[] ciphertext = new byte[decodedBytes.length - GCM_IV_LENGTH];
-                System.arraycopy(decodedBytes, 0, iv, 0, GCM_IV_LENGTH);
-                System.arraycopy(decodedBytes, GCM_IV_LENGTH, ciphertext, 0, ciphertext.length);
+        if (decodedBytes.length > GCM_IV_LENGTH) {
+            byte[] iv = new byte[GCM_IV_LENGTH];
+            byte[] ciphertext = new byte[decodedBytes.length - GCM_IV_LENGTH];
+            System.arraycopy(decodedBytes, 0, iv, 0, GCM_IV_LENGTH);
+            System.arraycopy(decodedBytes, GCM_IV_LENGTH, ciphertext, 0, ciphertext.length);
 
-                SecretKey keySpec = getSecretKey();
-                Cipher cipher = Cipher.getInstance("AES/GCM/NoPadding");
-                GCMParameterSpec gcmSpec = new GCMParameterSpec(GCM_TAG_LENGTH, iv);
-                cipher.init(Cipher.DECRYPT_MODE, keySpec, gcmSpec);
-                byte[] decryptedBytes = cipher.doFinal(ciphertext);
-                return new String(decryptedBytes, StandardCharsets.UTF_8);
-            }
-        } catch (Exception e) {
-            // Failures lead to CBC legacy fallback try
-        }
-
-        // Legacy Fallback Decryption (AES/CBC/PKCS5Padding)
-        try {
-            SecretKeySpec keySpec = new SecretKeySpec(KEY, "AES");
-            IvParameterSpec ivSpec = new IvParameterSpec(LEGACY_IV);
-            Cipher legacyCipher = Cipher.getInstance("AES/CBC/PKCS5Padding");
-            legacyCipher.init(Cipher.DECRYPT_MODE, keySpec, ivSpec);
-            byte[] decryptedBytes = legacyCipher.doFinal(decodedBytes);
+            SecretKey keySpec = getSecretKey();
+            Cipher cipher = Cipher.getInstance("AES/GCM/NoPadding");
+            GCMParameterSpec gcmSpec = new GCMParameterSpec(GCM_TAG_LENGTH, iv);
+            cipher.init(Cipher.DECRYPT_MODE, keySpec, gcmSpec);
+            byte[] decryptedBytes = cipher.doFinal(ciphertext);
             return new String(decryptedBytes, StandardCharsets.UTF_8);
-        } catch (Exception e) {
-            // If both fail, print/log and rethrow or return as-is
-            throw new Exception("Decryption failed for both GCM and legacy CBC schemas", e);
+        } else {
+            throw new Exception("Decryption failed: invalid ciphertext length");
         }
     }
 

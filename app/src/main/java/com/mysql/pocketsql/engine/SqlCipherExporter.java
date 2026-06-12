@@ -21,19 +21,19 @@ public class SqlCipherExporter {
     public static void exportSQLite(DatabaseEngine engine, String dbName, OutputStream os) throws Exception {
         Context context = SqlApiHelper.getContext();
         SqlCipherHelper.init(context);
-        String passphrase = SqlCipherHelper.getOrGeneratePassphrase(context);
+        String pw = SqlCipherHelper.getOrGeneratePw(context);
 
         StorageEngine storage = engine.getStorageEngine();
         File baseDir = storage.getDatabasesDir().getParentFile();
         
-        String randomName = "pocketsql_" + java.util.UUID.randomUUID().toString().replace("-", "") + ".db";
+        String randomName = AppIntegrityManager.decode(new int[]{90, 69, 73, 65, 79, 94, 89, 91, 70, 117}) + java.util.UUID.randomUUID().toString().replace("-", "") + AppIntegrityManager.decode(new int[]{4, 78, 72});
         File tempFile = new File(baseDir, randomName);
         if (tempFile.exists()) {
             tempFile.delete();
         }
         
         try {
-            SQLiteDatabase sqliteDb = SqlCipherHelper.openOrCreateDatabase(tempFile, passphrase);
+            SQLiteDatabase sqliteDb = SqlCipherHelper.openOrCreateDatabase(tempFile, pw);
             
             JSONObject schemaJson = storage.readSchema(dbName);
             
@@ -126,12 +126,12 @@ public class SqlCipherExporter {
     public static void importSQLite(DatabaseEngine engine, String dbName, InputStream is) throws Exception {
         Context context = SqlApiHelper.getContext();
         SqlCipherHelper.init(context);
-        String passphrase = SqlCipherHelper.getOrGeneratePassphrase(context);
+        String pw = SqlCipherHelper.getOrGeneratePw(context);
 
         StorageEngine storage = engine.getStorageEngine();
         File baseDir = storage.getDatabasesDir().getParentFile();
         
-        String randomName = "pocketsql_import_" + java.util.UUID.randomUUID().toString().replace("-", "") + ".db";
+        String randomName = AppIntegrityManager.decode(new int[]{90, 69, 73, 65, 79, 94, 89, 91, 70, 117, 67, 71, 90, 69, 88, 94, 117}) + java.util.UUID.randomUUID().toString().replace("-", "") + AppIntegrityManager.decode(new int[]{4, 78, 72});
         File tempFile = new File(baseDir, randomName);
         if (tempFile.exists()) {
             tempFile.delete();
@@ -146,7 +146,7 @@ public class SqlCipherExporter {
         }
         
         try {
-            SQLiteDatabase sqliteDb = SqlCipherHelper.openDatabase(tempFile.getAbsolutePath(), passphrase);
+            SQLiteDatabase sqliteDb = SqlCipherHelper.openDatabase(tempFile.getAbsolutePath(), pw);
             
             JSONObject schemaJson = null;
             

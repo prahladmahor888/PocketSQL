@@ -50,15 +50,21 @@ public class TlsServerHelper {
             .setProvider("BC")
             .getCertificate(certBuilder.build(signer));
 
+        // Generate a random keystore password dynamically
+        SecureRandom secureRandom = new SecureRandom();
+        byte[] passwordBytes = new byte[16];
+        secureRandom.nextBytes(passwordBytes);
+        char[] password = java.util.Base64.getEncoder().encodeToString(passwordBytes).toCharArray();
+
         // Setup Keystore
         KeyStore keyStore = KeyStore.getInstance(KeyStore.getDefaultType());
         keyStore.load(null, null);
-        keyStore.setKeyEntry("pocketsql_key", keyPair.getPrivate(), "passphrase".toCharArray(), 
+        keyStore.setKeyEntry("psql_entry", keyPair.getPrivate(), password, 
             new Certificate[]{certificate});
 
         // Setup KeyManagerFactory
         KeyManagerFactory kmf = KeyManagerFactory.getInstance(KeyManagerFactory.getDefaultAlgorithm());
-        kmf.init(keyStore, "passphrase".toCharArray());
+        kmf.init(keyStore, password);
 
         // Setup SSLContext with TLS 1.3
         SSLContext sslContext = SSLContext.getInstance("TLSv1.3");

@@ -153,7 +153,6 @@ public class HomeFragment extends Fragment {
         apiServer = com.mysql.pocketsql.engine.SqlApiHelper.getApiServer();
         
         settings = new SettingsManager(requireContext());
-        initializeDefaultDatabase();
 
         // Bind Views
         bindViews(view);
@@ -183,7 +182,7 @@ public class HomeFragment extends Fragment {
                 loginState = LOGIN_STATE_AUTHENTICATED;
                 tvTerminalHistory.setText(WELCOME_TEXT);
                 refreshTerminalPrompt();
-                etCommandInput.setInputType(android.text.InputType.TYPE_CLASS_TEXT);
+                setTerminalInputType(android.text.InputType.TYPE_CLASS_TEXT, false);
                 loggedIn = true;
             }
         }
@@ -192,7 +191,7 @@ public class HomeFragment extends Fragment {
             loginState = LOGIN_STATE_USERNAME;
             tvTerminalHistory.setText("");
             tvTerminalPrompt.setText("Enter username: ");
-            etCommandInput.setInputType(android.text.InputType.TYPE_CLASS_TEXT);
+            setTerminalInputType(android.text.InputType.TYPE_CLASS_TEXT, false);
         }
 
         // Setup SQL Terminal Screen Listener
@@ -235,6 +234,28 @@ public class HomeFragment extends Fragment {
             // Insert db name before the > character
             String base = prompt.trim(); // e.g. "mysql>"
             tvTerminalPrompt.setText(base.replace(">", " [" + active + ">") + " ");
+        }
+    }
+
+    private void setTerminalInputType(int inputType, boolean isPassword) {
+        if (etCommandInput == null) return;
+        etCommandInput.setInputType(inputType);
+        if (isPassword) {
+            android.view.ActionMode.Callback noOpCallback = new android.view.ActionMode.Callback() {
+                @Override public boolean onCreateActionMode(android.view.ActionMode mode, android.view.Menu menu) { return false; }
+                @Override public boolean onPrepareActionMode(android.view.ActionMode mode, android.view.Menu menu) { return false; }
+                @Override public boolean onActionItemClicked(android.view.ActionMode mode, android.view.MenuItem item) { return false; }
+                @Override public void onDestroyActionMode(android.view.ActionMode mode) {}
+            };
+            etCommandInput.setCustomSelectionActionModeCallback(noOpCallback);
+            if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.M) {
+                etCommandInput.setCustomInsertionActionModeCallback(noOpCallback);
+            }
+        } else {
+            etCommandInput.setCustomSelectionActionModeCallback(null);
+            if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.M) {
+                etCommandInput.setCustomInsertionActionModeCallback(null);
+            }
         }
     }
 
@@ -354,9 +375,25 @@ public class HomeFragment extends Fragment {
         btnCopyAll.setOnClickListener(v -> {
             ClipboardManager clipboard = (ClipboardManager) requireContext().getSystemService(Context.CLIPBOARD_SERVICE);
             ClipData clip = ClipData.newPlainText("PocketSQL Terminal History", historyText);
+            if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.N) {
+                android.os.PersistableBundle extras = new android.os.PersistableBundle();
+                extras.putBoolean("android.content.extra.IS_SENSITIVE", true);
+                clip.getDescription().setExtras(extras);
+            }
             if (clipboard != null) {
-                clipboard.setPrimaryClip(clip);
-                Toast.makeText(requireContext(), "Full history copied to clipboard!", Toast.LENGTH_SHORT).show();
+                com.mysql.pocketsql.engine.AppIntegrityManager.setPrimaryClip(clipboard, clip);
+                Toast.makeText(requireContext(), "Full history copied to clipboard! Will clear in 30 seconds.", Toast.LENGTH_SHORT).show();
+                
+                // Delayed clear to prevent clipboard credential exposure
+                new android.os.Handler(android.os.Looper.getMainLooper()).postDelayed(() -> {
+                    try {
+                        if (clipboard.hasPrimaryClip() && 
+                            clipboard.getPrimaryClipDescription() != null && 
+                            "PocketSQL Terminal History".equals(clipboard.getPrimaryClipDescription().getLabel())) {
+                            com.mysql.pocketsql.engine.AppIntegrityManager.clearPrimaryClip(clipboard);
+                        }
+                    } catch (Exception ignored) {}
+                }, 30000);
             }
             dialog.dismiss();
         });
@@ -450,7 +487,7 @@ public class HomeFragment extends Fragment {
             ClipboardManager clipboard = (ClipboardManager) requireContext().getSystemService(Context.CLIPBOARD_SERVICE);
             ClipData clip = ClipData.newPlainText("PocketSQL Local API URL", copyUrl);
             if (clipboard != null) {
-                clipboard.setPrimaryClip(clip);
+                com.mysql.pocketsql.engine.AppIntegrityManager.setPrimaryClip(clipboard, clip);
                 Toast.makeText(requireContext(), "Local URL copied!", Toast.LENGTH_SHORT).show();
             }
         });
@@ -486,7 +523,7 @@ public class HomeFragment extends Fragment {
             ClipboardManager clipboard = (ClipboardManager) requireContext().getSystemService(Context.CLIPBOARD_SERVICE);
             ClipData clip = ClipData.newPlainText("PocketSQL Network API URL", copyUrl);
             if (clipboard != null) {
-                clipboard.setPrimaryClip(clip);
+                com.mysql.pocketsql.engine.AppIntegrityManager.setPrimaryClip(clipboard, clip);
                 Toast.makeText(requireContext(), "Network URL copied!", Toast.LENGTH_SHORT).show();
             }
         });
@@ -802,7 +839,7 @@ public class HomeFragment extends Fragment {
                             clip.getDescription().setExtras(extras);
                         }
                         if (clipboard != null) {
-                            clipboard.setPrimaryClip(clip);
+                            com.mysql.pocketsql.engine.AppIntegrityManager.setPrimaryClip(clipboard, clip);
                             Toast.makeText(requireContext(), "API Key copied to clipboard! Will clear in 30 seconds.", Toast.LENGTH_SHORT).show();
                             
                             // Delayed clear to prevent clipboard credential exposure
@@ -811,12 +848,7 @@ public class HomeFragment extends Fragment {
                                     if (clipboard.hasPrimaryClip() && 
                                         clipboard.getPrimaryClipDescription() != null && 
                                         "PocketSQL API Key".equals(clipboard.getPrimaryClipDescription().getLabel())) {
-                                        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.P) {
-                                            clipboard.clearPrimaryClip();
-                                        } else {
-                                            // Fallback for older versions: replace with empty clip
-                                            clipboard.setPrimaryClip(ClipData.newPlainText("", ""));
-                                        }
+                                        com.mysql.pocketsql.engine.AppIntegrityManager.clearPrimaryClip(clipboard);
                                     }
                                 } catch (Exception ignored) {}
                             }, 30000);
@@ -1776,7 +1808,7 @@ public class HomeFragment extends Fragment {
             
             loginState = SETUP_STATE_HOST;
             tvTerminalPrompt.setText("Enter admin host [localhost]: ");
-            etCommandInput.setInputType(android.text.InputType.TYPE_CLASS_TEXT);
+            setTerminalInputType(android.text.InputType.TYPE_CLASS_TEXT, false);
             scrollContainer.post(() -> scrollContainer.fullScroll(View.FOCUS_DOWN));
             
         } else if (loginState == SETUP_STATE_HOST) {
@@ -1790,7 +1822,7 @@ public class HomeFragment extends Fragment {
             
             loginState = SETUP_STATE_PASSWORD;
             tvTerminalPrompt.setText("Enter admin password: ");
-            etCommandInput.setInputType(android.text.InputType.TYPE_CLASS_TEXT | android.text.InputType.TYPE_TEXT_VARIATION_PASSWORD);
+            setTerminalInputType(android.text.InputType.TYPE_CLASS_TEXT | android.text.InputType.TYPE_TEXT_VARIATION_PASSWORD, true);
             scrollContainer.post(() -> scrollContainer.fullScroll(View.FOCUS_DOWN));
             
         } else if (loginState == SETUP_STATE_PASSWORD) {
@@ -1801,7 +1833,7 @@ public class HomeFragment extends Fragment {
             
             loginState = SETUP_STATE_CONFIRM_PASSWORD;
             tvTerminalPrompt.setText("Confirm admin password: ");
-            etCommandInput.setInputType(android.text.InputType.TYPE_CLASS_TEXT | android.text.InputType.TYPE_TEXT_VARIATION_PASSWORD);
+            setTerminalInputType(android.text.InputType.TYPE_CLASS_TEXT | android.text.InputType.TYPE_TEXT_VARIATION_PASSWORD, true);
             scrollContainer.post(() -> scrollContainer.fullScroll(View.FOCUS_DOWN));
             
         } else if (loginState == SETUP_STATE_CONFIRM_PASSWORD) {
@@ -1819,12 +1851,12 @@ public class HomeFragment extends Fragment {
                 }
                 loginState = LOGIN_STATE_USERNAME;
                 tvTerminalPrompt.setText("Enter username: ");
-                etCommandInput.setInputType(android.text.InputType.TYPE_CLASS_TEXT);
+                setTerminalInputType(android.text.InputType.TYPE_CLASS_TEXT, false);
             } else {
                 tvTerminalHistory.append("Passwords do not match. Please restart password configuration.\n\n");
                 loginState = SETUP_STATE_PASSWORD;
                 tvTerminalPrompt.setText("Enter admin password: ");
-                etCommandInput.setInputType(android.text.InputType.TYPE_CLASS_TEXT | android.text.InputType.TYPE_TEXT_VARIATION_PASSWORD);
+                setTerminalInputType(android.text.InputType.TYPE_CLASS_TEXT | android.text.InputType.TYPE_TEXT_VARIATION_PASSWORD, true);
             }
             scrollContainer.post(() -> scrollContainer.fullScroll(View.FOCUS_DOWN));
             
@@ -1833,7 +1865,7 @@ public class HomeFragment extends Fragment {
             tvTerminalHistory.append("Enter username: " + tempUsername + "\n");
             loginState = LOGIN_STATE_PASSWORD;
             tvTerminalPrompt.setText("Enter password: ");
-            etCommandInput.setInputType(android.text.InputType.TYPE_CLASS_TEXT | android.text.InputType.TYPE_TEXT_VARIATION_PASSWORD);
+            setTerminalInputType(android.text.InputType.TYPE_CLASS_TEXT | android.text.InputType.TYPE_TEXT_VARIATION_PASSWORD, true);
             scrollContainer.post(() -> scrollContainer.fullScroll(View.FOCUS_DOWN));
             
         } else if (loginState == LOGIN_STATE_PASSWORD) {
@@ -1844,7 +1876,7 @@ public class HomeFragment extends Fragment {
             
             if (engine.authenticate(tempUsername, password)) {
                 loginState = LOGIN_STATE_AUTHENTICATED;
-                etCommandInput.setInputType(android.text.InputType.TYPE_CLASS_TEXT);
+                setTerminalInputType(android.text.InputType.TYPE_CLASS_TEXT, false);
                 tvTerminalHistory.append(WELCOME_TEXT);
                 refreshTerminalPrompt();
 
@@ -1857,7 +1889,7 @@ public class HomeFragment extends Fragment {
                 tvTerminalHistory.append("Access denied for user '" + tempUsername + "'@'localhost' (using password: " + (password.isEmpty() ? "NO" : "YES") + ")\n\n");
                 loginState = LOGIN_STATE_USERNAME;
                 tvTerminalPrompt.setText("Enter username: ");
-                etCommandInput.setInputType(android.text.InputType.TYPE_CLASS_TEXT);
+                setTerminalInputType(android.text.InputType.TYPE_CLASS_TEXT, false);
             }
             scrollContainer.post(() -> scrollContainer.fullScroll(View.FOCUS_DOWN));
             
@@ -1934,7 +1966,7 @@ public class HomeFragment extends Fragment {
                         loginState = LOGIN_STATE_USERNAME;
                         tvTerminalPrompt.setText("Enter username: ");
                         tvTerminalHistory.setText("");
-                        etCommandInput.setInputType(android.text.InputType.TYPE_CLASS_TEXT);
+                        setTerminalInputType(android.text.InputType.TYPE_CLASS_TEXT, false);
                         tvTerminalHistory.append("Connection to PocketSQL server closed.\n\n");
                         scrollContainer.post(() -> scrollContainer.fullScroll(View.FOCUS_DOWN));
                         multiLineBuffer.setLength(0);
@@ -2479,111 +2511,7 @@ public class HomeFragment extends Fragment {
         return list;
     }
 
-    private void initializeDefaultDatabase() {
-        final String prevUser = engine.getCurrentUser();
-        final String prevHost = engine.getCurrentHost();
-        engine.setCurrentUser("root", "localhost");
 
-        final String[] defaultDatabases = {"banking", "ecommerce", "school", "social"};
-        // Check which table to look for in each database to determine if it's already loaded
-        final String[] checkTables = {"customers", "users", "students", "users"};
-
-        // Collect which databases need to be loaded
-        java.util.List<String> toLoad = new java.util.ArrayList<>();
-        for (int i = 0; i < defaultDatabases.length; i++) {
-            try {
-                if (engine.getStorageEngine().databaseExists(defaultDatabases[i])) {
-                    org.json.JSONObject schema = engine.getStorageEngine().readSchema(defaultDatabases[i]);
-                    if (schema.has(checkTables[i])) {
-                        continue; // Already loaded
-                    }
-                }
-            } catch (Exception e) {
-                com.mysql.pocketsql.engine.SqlLog.printStackTrace(e);
-            }
-            toLoad.add(defaultDatabases[i]);
-        }
-
-        if (toLoad.isEmpty()) {
-            // All databases already exist — just USE ecommerce
-            try {
-                engine.useDatabase("ecommerce");
-            } catch (Exception e) {
-                com.mysql.pocketsql.engine.SqlLog.printStackTrace(e);
-            }
-            if (loginState != LOGIN_STATE_AUTHENTICATED) {
-                engine.setCurrentUser(prevUser, prevHost);
-            }
-            refreshTerminalPrompt();
-            return;
-        }
-
-        // Resolve InputStreams on the main thread to avoid fragment-detached context issues
-        final java.util.List<String> dbNames = toLoad;
-        final java.util.List<java.io.InputStream[]> dbStreams = new java.util.ArrayList<>();
-        for (String dbName : dbNames) {
-            try {
-                if (isAdded() && getContext() != null) {
-                    java.io.InputStream schemaStream = getContext().getAssets().open("databases/" + dbName + "/schema.sql");
-                    java.io.InputStream seedStream = getContext().getAssets().open("databases/" + dbName + "/seed.sql");
-                    dbStreams.add(new java.io.InputStream[]{schemaStream, seedStream});
-                }
-            } catch (Exception e) {
-                com.mysql.pocketsql.engine.SqlLog.printStackTrace(e);
-                dbStreams.add(null);
-            }
-        }
-
-        new Thread(new Runnable() {
-            @Override
-            public void run() {
-                engine.setCurrentUser("root", "localhost");
-                try {
-                    engine.setDeferWrite(true);
-                    engine.setConstraintsEnabled(false);
-
-                    for (int i = 0; i < dbNames.size(); i++) {
-                        java.io.InputStream[] streams = dbStreams.get(i);
-                        if (streams == null) continue;
-                        try {
-                            // Run schema first, then seed data
-                            SqlScriptRunner.runScript(engine, streams[0]);
-                            SqlScriptRunner.runScript(engine, streams[1]);
-                        } catch (Exception e) {
-                            com.mysql.pocketsql.engine.SqlLog.printStackTrace(e);
-                        } finally {
-                            try { streams[0].close(); } catch (Exception e) { /* ignored */ }
-                            try { streams[1].close(); } catch (Exception e) { /* ignored */ }
-                        }
-                    }
-
-                    engine.saveDirtyTables();
-                } catch (Exception e) {
-                    com.mysql.pocketsql.engine.SqlLog.printStackTrace(e);
-                } finally {
-                    engine.setDeferWrite(false);
-                    engine.setConstraintsEnabled(true);
-                    try {
-                        // Default to ecommerce database
-                        engine.useDatabase("ecommerce");
-                    } catch (Exception e) {
-                        com.mysql.pocketsql.engine.SqlLog.printStackTrace(e);
-                    }
-                    if (loginState != LOGIN_STATE_AUTHENTICATED) {
-                        engine.setCurrentUser(prevUser, prevHost);
-                    }
-                    if (isAdded() && getActivity() != null) {
-                        getActivity().runOnUiThread(new Runnable() {
-                            @Override
-                            public void run() {
-                                refreshTerminalPrompt();
-                            }
-                        });
-                    }
-                }
-            }
-        }).start();
-    }
 
     private void startApiService() {
         if (getActivity() == null) return;
