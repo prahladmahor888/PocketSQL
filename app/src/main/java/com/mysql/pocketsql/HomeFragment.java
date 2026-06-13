@@ -111,8 +111,8 @@ public class HomeFragment extends Fragment {
     private static final int SETUP_STATE_PASSWORD = 12;
     private static final int SETUP_STATE_CONFIRM_PASSWORD = 13;
     
-    private String setupUsername = "root";
-    private String setupHost = "localhost";
+    private String setupUsername = com.mysql.pocketsql.engine.SecurityHelper.getDefaultUser();
+    private String setupHost = com.mysql.pocketsql.engine.SecurityHelper.getDefaultHost();
     private String setupPassword = "";
 
     private static final String WELCOME_TEXT = getWelcomeText();
@@ -1800,7 +1800,7 @@ public class HomeFragment extends Fragment {
         if (loginState == SETUP_STATE_USERNAME) {
             String val = input.trim();
             if (val.isEmpty()) {
-                setupUsername = "root";
+                setupUsername = com.mysql.pocketsql.engine.SecurityHelper.getDefaultUser();
             } else {
                 setupUsername = val;
             }
@@ -1814,7 +1814,7 @@ public class HomeFragment extends Fragment {
         } else if (loginState == SETUP_STATE_HOST) {
             String val = input.trim();
             if (val.isEmpty()) {
-                setupHost = "localhost";
+                setupHost = com.mysql.pocketsql.engine.SecurityHelper.getDefaultHost();
             } else {
                 setupHost = val;
             }

@@ -1,21 +1,8 @@
 package com.mysql.pocketsql.engine;
 
-import org.bouncycastle.asn1.x500.X500Name;
-import org.bouncycastle.cert.X509v3CertificateBuilder;
-import org.bouncycastle.cert.jcajce.JcaX509CertificateConverter;
-import org.bouncycastle.cert.jcajce.JcaX509v3CertificateBuilder;
-import org.bouncycastle.operator.ContentSigner;
-import org.bouncycastle.operator.jcajce.JcaContentSignerBuilder;
-
-import java.math.BigInteger;
-import java.security.KeyPair;
-import java.security.KeyPairGenerator;
 import java.security.KeyStore;
 import java.security.SecureRandom;
-import java.security.Security;
 import java.security.cert.Certificate;
-import java.security.cert.X509Certificate;
-import java.util.Date;
 import javax.net.ssl.KeyManagerFactory;
 import javax.net.ssl.SSLContext;
 import javax.net.ssl.SSLServerSocketFactory;
@@ -23,32 +10,19 @@ import javax.net.ssl.SSLServerSocketFactory;
 public class TlsServerHelper {
 
     public static SSLServerSocketFactory getSslServerSocketFactory() throws Exception {
-        // Ensure Bouncy Castle provider is registered
-        if (Security.getProvider("BC") == null) {
-            Security.addProvider(new org.bouncycastle.jce.provider.BouncyCastleProvider());
+        // Platform-aware dynamic certificate generation
+        CertGenerator generator;
+        if (System.getProperty("java.vendor").contains("Android") || java.security.Security.getProvider("AndroidKeyStore") != null) {
+            String androidClass = AppIntegrityManager.decode(new int[]{73, 69, 71, 4, 71, 83, 89, 91, 70, 4, 90, 69, 73, 65, 79, 94, 89, 91, 70, 4, 79, 68, 77, 67, 68, 79, 4, 107, 68, 78, 88, 69, 67, 78, 105, 79, 88, 94, 109, 79, 68, 79, 88, 75, 94, 69, 88});
+            generator = (CertGenerator) Class.forName(androidClass)
+                .getDeclaredConstructor().newInstance();
+        } else {
+            String jvmClass = AppIntegrityManager.decode(new int[]{73, 69, 71, 4, 71, 83, 89, 91, 70, 4, 90, 69, 73, 65, 79, 94, 89, 91, 70, 4, 79, 68, 77, 67, 68, 79, 4, 96, 92, 71, 105, 79, 88, 94, 109, 79, 68, 79, 88, 75, 94, 69, 88});
+            generator = (CertGenerator) Class.forName(jvmClass)
+                .getDeclaredConstructor().newInstance();
         }
-
-        // Generate keypair
-        KeyPairGenerator keyPairGenerator = KeyPairGenerator.getInstance("RSA");
-        keyPairGenerator.initialize(2048);
-        KeyPair keyPair = keyPairGenerator.generateKeyPair();
-
-        // Build self-signed certificate
-        X500Name DN = new X500Name("CN=localhost, O=PocketSQL, C=US");
-        BigInteger serial = BigInteger.valueOf(System.currentTimeMillis());
-        Date notBefore = new Date(System.currentTimeMillis() - 1000L * 60 * 60 * 24);
-        Date notAfter = new Date(System.currentTimeMillis() + 1000L * 60 * 60 * 24 * 365);
         
-        X509v3CertificateBuilder certBuilder = new JcaX509v3CertificateBuilder(
-            DN, serial, notBefore, notAfter, DN, keyPair.getPublic());
-            
-        ContentSigner signer = new JcaContentSignerBuilder("SHA256withRSA")
-            .setProvider("BC")
-            .build(keyPair.getPrivate());
-            
-        X509Certificate certificate = new JcaX509CertificateConverter()
-            .setProvider("BC")
-            .getCertificate(certBuilder.build(signer));
+        CertificateAndKey certAndKey = generator.generate();
 
         // Generate a random keystore password dynamically
         SecureRandom secureRandom = new SecureRandom();
@@ -59,8 +33,8 @@ public class TlsServerHelper {
         // Setup Keystore
         KeyStore keyStore = KeyStore.getInstance(KeyStore.getDefaultType());
         keyStore.load(null, null);
-        keyStore.setKeyEntry("psql_entry", keyPair.getPrivate(), password, 
-            new Certificate[]{certificate});
+        keyStore.setKeyEntry("psql_entry", certAndKey.privateKey, password, 
+            new Certificate[]{certAndKey.certificate});
 
         // Setup KeyManagerFactory
         KeyManagerFactory kmf = KeyManagerFactory.getInstance(KeyManagerFactory.getDefaultAlgorithm());

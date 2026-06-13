@@ -4676,7 +4676,7 @@ public class DatabaseEngine {
                 row.put("type", "FUNCTION");
                 row.put("TYPE", "FUNCTION");
                 
-                String definer = (currentUser != null ? currentUser : "root") + "@" + (currentHost != null ? currentHost : "localhost");
+                String definer = (currentUser != null ? currentUser : SecurityHelper.getDefaultUser()) + "@" + (currentHost != null ? currentHost : SecurityHelper.getDefaultHost());
                 row.put("Definer", definer);
                 row.put("definer", definer);
                 row.put("DEFINER", definer);

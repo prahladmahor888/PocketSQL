@@ -591,7 +591,14 @@ public class SqlFunctions {
                 long nextSeed = (a * seed + c) % m;
                 return (double) nextSeed / (double) m;
             }
-            return new java.security.SecureRandom().nextDouble();
+            java.security.SecureRandom sr = new java.security.SecureRandom();
+            byte[] bytes = new byte[8];
+            sr.nextBytes(bytes);
+            long l = 0;
+            for (int i = 0; i < 8; i++) {
+                l = (l << 8) | (bytes[i] & 0xFF);
+            }
+            return (double)(l & 0x1FFFFFFFFFFFFFL) / (double)(1L << 53);
         }
         if ("SIGN".equals(name)) {
             if (argVals.isEmpty() || argVals.get(0) == null) return null;
@@ -861,11 +868,11 @@ public class SqlFunctions {
             return engine != null ? engine.getActiveDatabase() : null;
         }
         if ("USER".equals(name) || "SYSTEM_USER".equals(name) || "SESSION_USER".equals(name)) {
-            if (engine == null) return "root@localhost";
+            if (engine == null) return SecurityHelper.getDefaultUser() + "@" + SecurityHelper.getDefaultHost();
             String user = engine.getCurrentUser();
             String host = engine.getCurrentHost();
-            if (user == null) user = "root";
-            if (host == null) host = "localhost";
+            if (user == null) user = SecurityHelper.getDefaultUser();
+            if (host == null) host = SecurityHelper.getDefaultHost();
             return user + "@" + host;
         }
         if ("VERSION".equals(name)) {

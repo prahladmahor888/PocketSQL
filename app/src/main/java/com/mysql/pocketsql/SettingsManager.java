@@ -175,7 +175,7 @@ public class SettingsManager {
     // ── Auto-login credentials ──────────────────────────────────────────────────
 
     public String getLastUsername() {
-        return prefs.getString("last_username", "root");
+        return prefs.getString("last_username", com.mysql.pocketsql.engine.SecurityHelper.getDefaultUser());
     }
 
     public void setLastUsername(String username) {
@@ -183,7 +183,7 @@ public class SettingsManager {
     }
 
     public String getLastHost() {
-        return prefs.getString("last_host", "localhost");
+        return prefs.getString("last_host", com.mysql.pocketsql.engine.SecurityHelper.getDefaultHost());
     }
 
     public void setLastHost(String host) {

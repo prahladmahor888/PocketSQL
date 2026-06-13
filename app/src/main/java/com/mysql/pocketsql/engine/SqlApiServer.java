@@ -208,7 +208,7 @@ public class SqlApiServer {
                     String originalUser = engine.getCurrentUser();
                     String originalHost = engine.getCurrentHost();
                     try {
-                        engine.setCurrentUser("root", "localhost");
+                        engine.setCurrentUser(SecurityHelper.getDefaultUser(), SecurityHelper.getDefaultHost());
                         if (db != null && !db.trim().isEmpty()) {
                             engine.useDatabase(db.trim());
                         }

@@ -171,4 +171,10 @@ public class SecurityUnitTest {
         com.mysql.pocketsql.engine.SqlApiKeyManager reloaded = new com.mysql.pocketsql.engine.SqlApiKeyManager(baseDir);
         assertTrue(reloaded.isValidKey(key));
     }
+
+    @Test
+    public void testTlsServerHelper() throws Exception {
+        javax.net.ssl.SSLServerSocketFactory factory = com.mysql.pocketsql.engine.TlsServerHelper.getSslServerSocketFactory();
+        assertNotNull(factory);
+    }
 }

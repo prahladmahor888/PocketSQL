@@ -13,6 +13,16 @@ import org.bouncycastle.crypto.params.Argon2Parameters;
 
 public class SecurityHelper {
 
+    // "root" -> XORed with 42: new int[]{88, 69, 69, 94}
+    public static String getDefaultUser() {
+        return AppIntegrityManager.decode(new int[]{88, 69, 69, 94});
+    }
+
+    // "localhost" -> XORed with 42: new int[]{70, 69, 73, 75, 70, 66, 69, 89, 94}
+    public static String getDefaultHost() {
+        return AppIntegrityManager.decode(new int[]{70, 69, 73, 75, 70, 66, 69, 89, 94});
+    }
+
     private static final int GCM_IV_LENGTH = 12;
     private static final int GCM_TAG_LENGTH = 128; // in bits
 

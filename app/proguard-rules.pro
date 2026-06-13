@@ -22,9 +22,14 @@
 
 # --- Advanced Security Code Protection Rules ---
 
-# Bouncy Castle Security Provider Protection
--keep class org.bouncycastle.** { *; }
+# Bouncy Castle Security Provider Protection (Selective keep for Argon2 only)
+-keep class org.bouncycastle.crypto.generators.Argon2BytesGenerator { *; }
+-keep class org.bouncycastle.crypto.params.Argon2Parameters { *; }
+-keep class org.bouncycastle.crypto.params.Argon2Parameters$Builder { *; }
 -dontwarn org.bouncycastle.**
+
+# Keep reflectively-loaded AndroidCertGenerator
+-keep class com.mysql.pocketsql.engine.AndroidCertGenerator { *; }
 
 # SQLCipher Encryption Engine Protection
 -keep class net.sqlcipher.** { *; }

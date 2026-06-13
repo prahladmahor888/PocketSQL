@@ -204,7 +204,7 @@ public class SqlPrivilegeManager {
 
     public void initializeDefaultRootUser() {
         try {
-            initializeAdminUser("root", "localhost", "");
+            initializeAdminUser(SecurityHelper.getDefaultUser(), SecurityHelper.getDefaultHost(), "");
         } catch (Exception e) {
             com.mysql.pocketsql.engine.SqlLog.printStackTrace(e);
         }

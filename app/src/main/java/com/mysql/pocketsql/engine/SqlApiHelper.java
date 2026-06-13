@@ -84,7 +84,7 @@ public class SqlApiHelper {
             public void run() {
                 final String prevUser = engine.getCurrentUser();
                 final String prevHost = engine.getCurrentHost();
-                engine.setCurrentUser("root", "localhost");
+                engine.setCurrentUser(SecurityHelper.getDefaultUser(), SecurityHelper.getDefaultHost());
 
                 try {
                     engine.setDeferWrite(true);
