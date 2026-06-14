@@ -499,7 +499,7 @@ public class HomeFragment extends Fragment {
         networkUrlRow.setGravity(android.view.Gravity.CENTER_VERTICAL);
         
         TextView tvNetworkUrl = new TextView(requireContext());
-        String ipAddress = com.mysql.pocketsql.engine.SqlApiHelper.getLocalIpAddress();
+        String hostAddress = com.mysql.pocketsql.engine.SqlApiHelper.getNetworkHostAddress();
         tvNetworkUrl.setTextColor(Color.WHITE);
         tvNetworkUrl.setTextSize(TypedValue.COMPLEX_UNIT_SP, 11);
         tvNetworkUrl.setTypeface(Typeface.MONOSPACE);
@@ -515,7 +515,7 @@ public class HomeFragment extends Fragment {
         btnCopyNetwork.setFocusable(true);
         btnCopyNetwork.setOnClickListener(v -> {
             int portVal = apiServer != null ? apiServer.getActivePort() : 8080;
-            String copyUrl = "http://" + ipAddress + ":" + portVal + "/api/query";
+            String copyUrl = "http://" + hostAddress + ":" + portVal + "/api/query";
             if (apiServer != null && apiServer.getBindErrorMessage() != null) {
                 Toast.makeText(requireContext(), "Cannot copy: Bind failed", Toast.LENGTH_SHORT).show();
                 return;
@@ -572,7 +572,7 @@ public class HomeFragment extends Fragment {
                     btnToggleServer.setBackgroundColor(Color.parseColor("#FF5555"));
                     
                     tvLocalUrl.setText("Local URL: http://localhost:" + portVal + "/api/query");
-                    tvNetworkUrl.setText("Network URL: http://" + ipAddress + ":" + portVal + "/api/query");
+                    tvNetworkUrl.setText("Network URL: http://" + hostAddress + ":" + portVal + "/api/query");
                 } else {
                     tvStatusValue.setText("INACTIVE");
                     tvStatusValue.setTextColor(Color.parseColor("#FF5555"));
@@ -581,10 +581,10 @@ public class HomeFragment extends Fragment {
                     btnToggleServer.setBackgroundColor(Color.parseColor("#00E5FF"));
                     
                     tvLocalUrl.setText("Local URL: http://localhost:" + portVal + "/api/query");
-                    tvNetworkUrl.setText("Network URL: http://" + ipAddress + ":" + portVal + "/api/query");
+                    tvNetworkUrl.setText("Network URL: http://" + hostAddress + ":" + portVal + "/api/query");
                 }
 
-                String guideIp = ipAddress.equals("localhost") ? "localhost" : ipAddress;
+                String guideIp = hostAddress.equals("localhost") ? "localhost" : hostAddress;
                 String guideText = "To query the database from other platforms, send a HTTP POST request:\n\n" +
                         "End" + "point: ht" + "tp://" + guideIp + ":" + portVal + "/api/query\n" +
                         "Me" + "thod: PO" + "ST\n" +
@@ -2523,7 +2523,8 @@ public class HomeFragment extends Fragment {
             }
         }
         android.content.Intent intent = new android.content.Intent(context, SqlApiService.class);
-        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
+        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O 
+                && android.os.Build.VERSION.SDK_INT < android.os.Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
             context.startForegroundService(intent);
         } else {
             context.startService(intent);

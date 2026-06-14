@@ -184,7 +184,7 @@ public class SqlApiHelper {
         return apiServer;
     }
 
-    public static String getLocalIpAddress() {
+    public static String getNetworkHostAddress() {
         try {
             List<NetworkInterface> interfaces = Collections.list(NetworkInterface.getNetworkInterfaces());
             for (NetworkInterface intf : interfaces) {

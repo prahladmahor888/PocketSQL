@@ -34,7 +34,14 @@ public class SqlApiService extends Service {
     @Override
     public int onStartCommand(Intent intent, int flags, int startId) {
         if (intent != null && ACTION_STOP_SERVER.equals(intent.getAction())) {
-            stopForeground(true);
+            if (Build.VERSION.SDK_INT < Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
+                stopForeground(true);
+            } else {
+                NotificationManager manager = (NotificationManager) getSystemService(Context.NOTIFICATION_SERVICE);
+                if (manager != null) {
+                    manager.cancel(NOTIFICATION_ID);
+                }
+            }
             stopSelf();
             return START_NOT_STICKY;
         }
@@ -61,11 +68,11 @@ public class SqlApiService extends Service {
         Intent mainIntent = new Intent(this, MainActivity.class);
         PendingIntent mainPendingIntent = PendingIntent.getActivity(this, 0, mainIntent, pendingFlags);
 
-        String ip = com.mysql.pocketsql.engine.SqlApiHelper.getLocalIpAddress();
+        String hostAddress = com.mysql.pocketsql.engine.SqlApiHelper.getNetworkHostAddress();
         int activePort = com.mysql.pocketsql.engine.SqlApiHelper.getApiServer().getActivePort();
         String bindError = com.mysql.pocketsql.engine.SqlApiHelper.getApiServer().getBindErrorMessage();
         String protocol = com.mysql.pocketsql.engine.SqlApiHelper.getApiServer().isTlsEnabled() ? "https://" : "http://";
-        String content = (bindError != null) ? "API Server bind failed: " + bindError : "API Server running on: " + protocol + ip + ":" + activePort + "/api/query";
+        String content = (bindError != null) ? "API Server bind failed: " + bindError : "API Server running on: " + protocol + hostAddress + ":" + activePort + "/api/query";
 
         Notification notification = new NotificationCompat.Builder(this, CHANNEL_ID)
                 .setContentTitle("PocketSQL API Server")
@@ -77,7 +84,14 @@ public class SqlApiService extends Service {
                 .setPriority(NotificationCompat.PRIORITY_LOW)
                 .build();
 
-        startForeground(NOTIFICATION_ID, notification);
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
+            startForeground(NOTIFICATION_ID, notification);
+        } else {
+            NotificationManager manager = (NotificationManager) getSystemService(Context.NOTIFICATION_SERVICE);
+            if (manager != null) {
+                manager.notify(NOTIFICATION_ID, notification);
+            }
+        }
 
         return START_STICKY;
     }
@@ -89,6 +103,14 @@ public class SqlApiService extends Service {
             SqlApiHelper.getApiServer().stop();
         } catch (Exception e) {
             com.mysql.pocketsql.engine.SqlLog.printStackTrace(e);
+        }
+        try {
+            NotificationManager manager = (NotificationManager) getSystemService(Context.NOTIFICATION_SERVICE);
+            if (manager != null) {
+                manager.cancel(NOTIFICATION_ID);
+            }
+        } catch (Exception e) {
+            // Ignore
         }
     }
 
