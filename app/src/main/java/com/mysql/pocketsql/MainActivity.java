@@ -17,11 +17,6 @@ public class MainActivity extends AppCompatActivity {
         // Initialize SQL API helper and trigger default DB checks/loading early
         com.mysql.pocketsql.engine.SqlApiHelper.init(this);
         
-        // Prevent screenshots and screen recording for security protection (FLAG_SECURE)
-        getWindow().setFlags(
-            android.view.WindowManager.LayoutParams.FLAG_SECURE,
-            android.view.WindowManager.LayoutParams.FLAG_SECURE
-        );
 
 
 

@@ -4,6 +4,8 @@ import android.content.Context;
 import android.content.SharedPreferences;
 import android.graphics.Color;
 
+import org.json.JSONArray;
+import org.json.JSONObject;
 public class SettingsManager {
 
     private static final String PREFS_NAME = "pocketsql_secure_settings";
@@ -219,5 +221,62 @@ public class SettingsManager {
 
     public void setAutoLogin(boolean enabled) {
         prefs.edit().putBoolean("auto_login", enabled).apply();
+    }
+
+    // ── Multiple Connections ───────────────────────────────────────────────────
+
+    public JSONArray getSavedConnections() {
+        String jsonStr = prefs.getString("saved_connections", "[]");
+        try {
+            return new JSONArray(jsonStr);
+        } catch (Exception e) {
+            return new JSONArray();
+        }
+    }
+
+    public void saveConnection(String username, String host, String password) {
+        try {
+            JSONArray arr = getSavedConnections();
+            // Remove if exists to update
+            JSONArray newArr = new JSONArray();
+            for (int i = 0; i < arr.length(); i++) {
+                JSONObject obj = arr.getJSONObject(i);
+                if (obj.optString("username").equals(username) && obj.optString("host").equals(host)) {
+                    continue; // Skip the existing one
+                }
+                newArr.put(obj);
+            }
+            
+            JSONObject newConn = new JSONObject();
+            newConn.put("username", username);
+            newConn.put("host", host);
+            if (password == null || password.isEmpty()) {
+                newConn.put("password", "");
+            } else {
+                newConn.put("password", com.mysql.pocketsql.engine.SecurityHelper.encrypt(password));
+            }
+            newArr.put(newConn);
+            
+            prefs.edit().putString("saved_connections", newArr.toString()).apply();
+        } catch (Exception e) {
+            com.mysql.pocketsql.engine.SqlLog.printStackTrace(e);
+        }
+    }
+
+    public void removeConnection(String username, String host) {
+        try {
+            JSONArray arr = getSavedConnections();
+            JSONArray newArr = new JSONArray();
+            for (int i = 0; i < arr.length(); i++) {
+                JSONObject obj = arr.getJSONObject(i);
+                if (obj.optString("username").equals(username) && obj.optString("host").equals(host)) {
+                    continue;
+                }
+                newArr.put(obj);
+            }
+            prefs.edit().putString("saved_connections", newArr.toString()).apply();
+        } catch (Exception e) {
+            com.mysql.pocketsql.engine.SqlLog.printStackTrace(e);
+        }
     }
 }

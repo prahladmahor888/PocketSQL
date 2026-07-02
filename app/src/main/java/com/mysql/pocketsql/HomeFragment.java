@@ -62,6 +62,7 @@ public class HomeFragment extends Fragment {
     private TextView btnHistoryUp, btnHistoryDown;
     private TextView btnTemplate, btnClearLine, btnClearScreen, btnSettings, btnHelp, btnCopyAll;
     private TextView btnApiKeys;
+    private TextView btnConnections;
     private EditText etCommandInput;
     private HorizontalScrollView suggestionsBar;
     private LinearLayout suggestionsContainer;
@@ -214,6 +215,7 @@ public class HomeFragment extends Fragment {
         btnHelp        = v.findViewById(R.id.btnHelp);
         btnCopyAll     = v.findViewById(R.id.btnCopyAll);
         btnApiKeys     = v.findViewById(R.id.btnApiKeys);
+        btnConnections = v.findViewById(R.id.btnConnections);
         suggestionsBar = v.findViewById(R.id.suggestionsBar);
         suggestionsContainer = v.findViewById(R.id.suggestionsContainer);
     }
@@ -1002,10 +1004,13 @@ public class HomeFragment extends Fragment {
         btnHelp.setOnClickListener(v -> printHelpMessage());
 
         // Copy All
-        btnCopyAll.setOnClickListener(clickV -> showCopyDialog());
+        btnCopyAll.setOnClickListener(v -> showCopyDialog());
 
         // API Keys
         btnApiKeys.setOnClickListener(v -> showApiKeysDialog());
+        
+        // Connections
+        btnConnections.setOnClickListener(v -> showConnectionsDialog());
     }
 
     // ── Settings ──────────────────────────────────────────────────────────────
@@ -1846,6 +1851,7 @@ public class HomeFragment extends Fragment {
                 try {
                     engine.initializeAdminUser(setupUsername, setupHost, setupPassword);
                     tvTerminalHistory.append("\nPocketSQL configured successfully! Please log in.\n\n");
+                    promptSaveConnection(setupUsername, setupHost, setupPassword);
                 } catch (Exception e) {
                     tvTerminalHistory.append("\nError configuring credentials: " + e.getMessage() + "\n\n");
                 }
@@ -1885,6 +1891,8 @@ public class HomeFragment extends Fragment {
                 settings.setLastHost(engine.getCurrentHost());
                 settings.setLastPassword(password);
                 settings.setAutoLogin(true);
+                
+                promptSaveConnection(tempUsername, engine.getCurrentHost(), password);
             } else {
                 tvTerminalHistory.append("Access denied for user '" + tempUsername + "'@'localhost' (using password: " + (password.isEmpty() ? "NO" : "YES") + ")\n\n");
                 loginState = LOGIN_STATE_USERNAME;
@@ -2650,6 +2658,133 @@ public class HomeFragment extends Fragment {
             }
         }
         return result;
+    }
+    private void showConnectionsDialog() {
+        android.view.View dialogView = getLayoutInflater().inflate(R.layout.dialog_connections, null);
+        AlertDialog dialog = new AlertDialog.Builder(requireContext())
+                .setView(dialogView)
+                .create();
+
+        LinearLayout container = dialogView.findViewById(R.id.connectionsListContainer);
+        android.widget.Button btnClose = dialogView.findViewById(R.id.btnCloseConnections);
+        btnClose.setOnClickListener(v -> dialog.dismiss());
+        
+        android.widget.EditText etUsername = dialogView.findViewById(R.id.etConnUsername);
+        android.widget.EditText etPassword = dialogView.findViewById(R.id.etConnPassword);
+        android.widget.Button btnConnectManual = dialogView.findViewById(R.id.btnConnectManual);
+        
+        btnConnectManual.setOnClickListener(v -> {
+            String u = etUsername.getText().toString().trim();
+            String p = etPassword.getText().toString();
+            String h = "localhost"; // default host
+            if (u.isEmpty()) {
+                Toast.makeText(requireContext(), "Username required", Toast.LENGTH_SHORT).show();
+                return;
+            }
+            dialog.dismiss();
+            if (engine.authenticate(u, p)) {
+                loginState = LOGIN_STATE_AUTHENTICATED;
+                setTerminalInputType(android.text.InputType.TYPE_CLASS_TEXT, false);
+                tvTerminalHistory.append("\n" + WELCOME_TEXT);
+                refreshTerminalPrompt();
+                
+                settings.setLastUsername(u);
+                settings.setLastHost(h);
+                settings.setLastPassword(p);
+                settings.setAutoLogin(true);
+                settings.saveConnection(u, h, p);
+            } else {
+                Toast.makeText(requireContext(), "Authentication failed.", Toast.LENGTH_SHORT).show();
+            }
+        });
+
+        org.json.JSONArray connections = settings.getSavedConnections();
+        for (int i = 0; i < connections.length(); i++) {
+            try {
+                org.json.JSONObject conn = connections.getJSONObject(i);
+                String user = conn.optString("username");
+                String host = conn.optString("host");
+                String passEnc = conn.optString("password");
+                String pass = "";
+                if (!passEnc.isEmpty()) {
+                    pass = com.mysql.pocketsql.engine.SecurityHelper.decrypt(passEnc);
+                }
+                
+                LinearLayout row = new LinearLayout(requireContext());
+                row.setOrientation(LinearLayout.HORIZONTAL);
+                row.setPadding(0, dpToPx(8), 0, dpToPx(8));
+                
+                TextView tvUser = new TextView(requireContext());
+                tvUser.setText(user + "@" + host);
+                tvUser.setTextColor(Color.WHITE);
+                tvUser.setTextSize(TypedValue.COMPLEX_UNIT_SP, 14);
+                LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f);
+                lp.gravity = android.view.Gravity.CENTER_VERTICAL;
+                tvUser.setLayoutParams(lp);
+                row.addView(tvUser);
+                
+                android.widget.Button btnConnect = new android.widget.Button(requireContext());
+                btnConnect.setText("Connect");
+                String finalPass = pass;
+                btnConnect.setOnClickListener(v -> {
+                    dialog.dismiss();
+                    if (engine.authenticate(user, finalPass)) {
+                        loginState = LOGIN_STATE_AUTHENTICATED;
+                        setTerminalInputType(android.text.InputType.TYPE_CLASS_TEXT, false);
+                        tvTerminalHistory.append("\n" + WELCOME_TEXT);
+                        refreshTerminalPrompt();
+                        
+                        settings.setLastUsername(user);
+                        settings.setLastHost(host);
+                        settings.setLastPassword(finalPass);
+                        settings.setAutoLogin(true);
+                    } else {
+                        Toast.makeText(requireContext(), "Authentication failed for saved connection.", Toast.LENGTH_SHORT).show();
+                    }
+                });
+                row.addView(btnConnect);
+                
+                android.widget.Button btnDelete = new android.widget.Button(requireContext());
+                btnDelete.setText("X");
+                btnDelete.setTextColor(Color.RED);
+                btnDelete.setOnClickListener(v -> {
+                    settings.removeConnection(user, host);
+                    dialog.dismiss();
+                    showConnectionsDialog(); // refresh
+                });
+                row.addView(btnDelete);
+                
+                container.addView(row);
+            } catch (Exception e) {}
+        }
+        
+        dialog.show();
+        if (dialog.getWindow() != null) {
+            dialog.getWindow().setBackgroundDrawableResource(android.R.color.transparent);
+        }
+    }
+
+    private void promptSaveConnection(String username, String host, String password) {
+        org.json.JSONArray connections = settings.getSavedConnections();
+        boolean exists = false;
+        for (int i = 0; i < connections.length(); i++) {
+            org.json.JSONObject obj = connections.optJSONObject(i);
+            if (obj != null && obj.optString("username").equals(username) && obj.optString("host").equals(host)) {
+                exists = true;
+                break;
+            }
+        }
+        if (!exists) {
+            new AlertDialog.Builder(requireContext())
+                .setTitle("Save Connection")
+                .setMessage("Do you want to save this connection for quick access?")
+                .setPositiveButton("Save", (d, w) -> {
+                    settings.saveConnection(username, host, password);
+                    Toast.makeText(requireContext(), "Connection saved!", Toast.LENGTH_SHORT).show();
+                })
+                .setNegativeButton("No", null)
+                .show();
+        }
     }
 
     @Override
