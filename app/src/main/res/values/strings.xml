@@ -5,4 +5,96 @@
     <string name="btn_help">&#8505; Help</string>
     <string name="pocket">Pocket</string>
     <string name="sql">SQL</string>
+
+    <!-- Fragment Home Buttons & Prompts -->
+    <string name="prompt_default">mysql&gt; </string>
+    <string name="nav_up">▲</string>
+    <string name="nav_down">▼</string>
+    <string name="btn_template">⊞ Template</string>
+    <string name="btn_clear_line">⌫ Line</string>
+    <string name="btn_clear">✕ Clear</string>
+    <string name="btn_copy">📋 Copy</string>
+    <string name="btn_api_keys">🔑 API Keys</string>
+    <string name="btn_connections">🔌 Connections</string>
+    <string name="btn_settings">⚙ Settings</string>
+
+    <!-- Templates Dialog -->
+    <string name="templates_title">⚡  SQL Templates</string>
+    <string name="templates_search_hint">🔍  Search templates...</string>
+
+    <!-- Settings Dialog -->
+    <string name="settings_title">⚙  Settings</string>
+    <string name="dialog_close">✕</string>
+    <string name="section_appearance">APPEARANCE</string>
+    <string name="label_theme">Theme</string>
+    <string name="theme_classic">⬛  Classic  —  Black / White</string>
+    <string name="theme_matrix">🟩  Matrix  —  Black / Green</string>
+    <string name="theme_ocean">🟦  Ocean  —  Dark Blue / Cyan</string>
+    <string name="theme_dracula">🟣  Dracula  —  Dark / Violet</string>
+
+    <string name="section_font">FONT</string>
+    <string name="label_font_family">Font Family / Style</string>
+    <string name="label_font_size">Font Size</string>
+    <string name="font_size_small">Small — 12 sp</string>
+    <string name="font_size_medium">Medium — 14 sp</string>
+    <string name="font_size_large">Large — 16 sp</string>
+    <string name="font_size_xlarge">X-Large — 18 sp</string>
+    <string name="label_line_spacing">Line Spacing</string>
+    <string name="spacing_compact">Compact</string>
+    <string name="spacing_normal">Normal</string>
+    <string name="spacing_relaxed">Relaxed</string>
+
+    <string name="section_terminal">TERMINAL</string>
+    <string name="label_prompt_style">Prompt Style</string>
+    <string name="prompt_option_mysql">mysql&gt; </string>
+    <string name="prompt_option_pocketsql">pocketsql&gt; </string>
+    <string name="prompt_option_dollar">$ </string>
+    <string name="prompt_option_gt">&gt; </string>
+    <string name="title_autoscroll">Auto-scroll on Output</string>
+    <string name="subtitle_autoscroll">Scroll to bottom after each query</string>
+
+    <string name="section_db_utilities">DATABASE UTILITIES</string>
+    <string name="btn_export_db">Export Active DB</string>
+    <string name="btn_import_db">Import DB</string>
+    <string name="btn_cancel">Cancel</string>
+    <string name="btn_apply">Apply</string>
+
+    <!-- Connections Dialog -->
+    <string name="title_connections">Manual Connect</string>
+    <string name="hint_username">Username</string>
+    <string name="hint_password">Password</string>
+    <string name="hint_host">Host (e.g., 127.0.0.1)</string>
+    <string name="hint_port">Port (e.g., 3306)</string>
+    <string name="hint_database">Database Name</string>
+    <string name="btn_connect">Connect</string>
+    <string name="btn_connect_save">Connect &amp; Save</string>
+    <string name="saved_connections_title">Saved Connections</string>
+    <string name="btn_close">Close</string>
+
+    <!-- Toast & Dialog Java Messages -->
+    <string name="toast_history_empty">Terminal history is empty</string>
+    <string name="toast_history_copied">Full history copied to clipboard! Will clear in 30 seconds.</string>
+    <string name="toast_copy_bind_failed">Cannot copy: Bind failed</string>
+    <string name="toast_local_url_copied">Local URL copied!</string>
+    <string name="toast_network_url_copied">Network URL copied!</string>
+    <string name="toast_api_stopped">API Server stopped</string>
+    <string name="toast_api_started">API Server started in background</string>
+    <string name="toast_key_copied">API Key copied to clipboard! Will clear in 30 seconds.</string>
+    <string name="toast_key_deleted">API Key deleted!</string>
+    <string name="toast_key_generated">New API Key generated!</string>
+    <string name="toast_select_db_first">Please SELECT or USE a database first</string>
+    <string name="toast_no_db_export">No active database to export</string>
+    <string name="toast_exporting_db">Exporting database...</string>
+    <string name="toast_export_success">Database \'%1$s\' exported successfully!</string>
+    <string name="toast_export_failed">Export failed: %1$s</string>
+    <string name="toast_invalid_db_name">Invalid database name</string>
+    <string name="toast_importing_db">Importing database...</string>
+    <string name="toast_import_success">Database \'%1$s\' imported successfully!</string>
+    <string name="toast_import_failed">Import failed: %1$s</string>
+    <string name="toast_username_required">Username required</string>
+    <string name="toast_auth_failed">Authentication failed.</string>
+    <string name="toast_saved_auth_failed">Authentication failed for saved connection.</string>
+    <string name="toast_conn_saved">Connection saved!</string>
+    <string name="integrity_tamper_warning">CRITICAL: Binary signature tampered! App compromised!</string>
+    <string name="integrity_signature_error">CRITICAL: Signature verification failure!</string>
 </resources>

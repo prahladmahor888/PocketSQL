@@ -6,6 +6,8 @@ import android.graphics.Color;
 
 import org.json.JSONArray;
 import org.json.JSONObject;
+import java.util.ArrayList;
+import java.util.List;
 public class SettingsManager {
 
     private static final String PREFS_NAME = "pocketsql_secure_settings";
@@ -130,6 +132,158 @@ public class SettingsManager {
         int idx = getFontSizeIndex();
         if (idx < 0 || idx >= FONT_SIZES.length) idx = 1;
         return FONT_SIZES[idx];
+    }
+
+    // ── Font family ────────────────────────────────────────────────────────────
+
+    public static final String KEY_FONT_FAMILY = "font_family";
+
+    public static class FontOption {
+        public final String label;
+        public final String value;
+        public FontOption(String label, String value) {
+            this.label = label;
+            this.value = value;
+        }
+        @Override
+        public String toString() {
+            return label;
+        }
+    }
+
+    public String getFontFamily() {
+        return prefs.getString(KEY_FONT_FAMILY, "jetbrains_mono");
+    }
+
+    public void setFontFamily(String family) {
+        prefs.edit().putString(KEY_FONT_FAMILY, family).apply();
+    }
+
+    private static final java.util.Map<String, android.graphics.Typeface> typefaceCache = new java.util.HashMap<>();
+
+    public static boolean isMonospaceFont(android.graphics.Typeface tf) {
+        if (tf == null) return false;
+        android.text.TextPaint paint = new android.text.TextPaint();
+        paint.setTypeface(tf);
+        paint.setTextSize(32f);
+        float w1 = paint.measureText("i");
+        float w2 = paint.measureText("W");
+        float w3 = paint.measureText("m");
+        return Math.abs(w1 - w2) < 0.2f && Math.abs(w2 - w3) < 0.2f;
+    }
+
+    public static void clearTypefaceCache() {
+        typefaceCache.clear();
+    }
+
+    public android.graphics.Typeface getTypeface(Context context) {
+        String family = getFontFamily();
+        if (family == null || family.isEmpty()) family = "jetbrains_mono";
+
+        if (typefaceCache.containsKey(family)) {
+            android.graphics.Typeface cached = typefaceCache.get(family);
+            if (cached != null) return cached;
+        }
+
+        android.graphics.Typeface tf = loadTypefaceUncached(context, family);
+        if (tf != null) {
+            typefaceCache.put(family, tf);
+            return tf;
+        }
+        return android.graphics.Typeface.MONOSPACE;
+    }
+
+    public void applyFontToViewTree(android.view.View view) {
+        if (view == null) return;
+        android.graphics.Typeface tf = getTypeface(view.getContext());
+        applyFontToViewTree(view, tf);
+    }
+
+    public static void applyFontToViewTree(android.view.View view, android.graphics.Typeface tf) {
+        if (view == null || tf == null) return;
+
+        if (view instanceof android.widget.TextView) {
+            android.widget.TextView tv = (android.widget.TextView) view;
+            android.graphics.Typeface currentTf = tv.getTypeface();
+            int style = android.graphics.Typeface.NORMAL;
+            if (currentTf != null) {
+                style = currentTf.getStyle();
+            }
+            try {
+                tv.setTypeface(android.graphics.Typeface.create(tf, style));
+            } catch (Exception e) {
+                tv.setTypeface(tf, style);
+            }
+        } else if (view instanceof android.view.ViewGroup) {
+            android.view.ViewGroup vg = (android.view.ViewGroup) view;
+            for (int i = 0; i < vg.getChildCount(); i++) {
+                applyFontToViewTree(vg.getChildAt(i), tf);
+            }
+        }
+    }
+
+    private android.graphics.Typeface loadTypefaceUncached(Context context, String family) {
+        if ("monospace".equalsIgnoreCase(family)) {
+            return android.graphics.Typeface.MONOSPACE;
+        } else if ("sans_serif".equalsIgnoreCase(family)) {
+            return android.graphics.Typeface.SANS_SERIF;
+        } else if ("serif".equalsIgnoreCase(family)) {
+            return android.graphics.Typeface.SERIF;
+        } else if ("aboreto_regular".equalsIgnoreCase(family)) {
+            try {
+                android.graphics.Typeface tf = androidx.core.content.res.ResourcesCompat.getFont(context, R.font.aboreto_regular);
+                if (tf != null) return tf;
+            } catch (Exception ignored) {}
+        } else if ("barlowsemicondensed_regular".equalsIgnoreCase(family)) {
+            try {
+                android.graphics.Typeface tf = androidx.core.content.res.ResourcesCompat.getFont(context, R.font.barlowsemicondensed_regular);
+                if (tf != null) return tf;
+            } catch (Exception ignored) {}
+        } else if ("basic_regular".equalsIgnoreCase(family)) {
+            try {
+                android.graphics.Typeface tf = androidx.core.content.res.ResourcesCompat.getFont(context, R.font.basic_regular);
+                if (tf != null) return tf;
+            } catch (Exception ignored) {}
+        } else if ("dancingscript_regular".equalsIgnoreCase(family)) {
+            try {
+                android.graphics.Typeface tf = androidx.core.content.res.ResourcesCompat.getFont(context, R.font.dancingscript_regular);
+                if (tf != null) return tf;
+            } catch (Exception ignored) {}
+        } else if ("lobstertwo_regular".equalsIgnoreCase(family)) {
+            try {
+                android.graphics.Typeface tf = androidx.core.content.res.ResourcesCompat.getFont(context, R.font.lobstertwo_regular);
+                if (tf != null) return tf;
+            } catch (Exception ignored) {}
+        } else if ("rumraisin_regular".equalsIgnoreCase(family)) {
+            try {
+                android.graphics.Typeface tf = androidx.core.content.res.ResourcesCompat.getFont(context, R.font.rumraisin_regular);
+                if (tf != null) return tf;
+            } catch (Exception ignored) {}
+        }
+
+        // Default fallback: JetBrains Mono
+        try {
+            android.graphics.Typeface tf = androidx.core.content.res.ResourcesCompat.getFont(context, R.font.jetbrains_mono);
+            if (tf != null) return tf;
+        } catch (Exception e) {
+            // fallback
+        }
+        return android.graphics.Typeface.MONOSPACE;
+    }
+
+    public List<FontOption> getAvailableFontOptions(Context context) {
+        List<FontOption> options = new ArrayList<>();
+        options.add(new FontOption("JetBrains Mono (Default)", "jetbrains_mono"));
+        options.add(new FontOption("Aboreto", "aboreto_regular"));
+        options.add(new FontOption("Barlow Semi Condensed", "barlowsemicondensed_regular"));
+        options.add(new FontOption("Basic", "basic_regular"));
+        options.add(new FontOption("Dancing Script", "dancingscript_regular"));
+        options.add(new FontOption("Lobster Two", "lobstertwo_regular"));
+        options.add(new FontOption("Rum Raisin", "rumraisin_regular"));
+        options.add(new FontOption("System Monospace", "monospace"));
+        options.add(new FontOption("System Sans-Serif", "sans_serif"));
+        options.add(new FontOption("System Serif", "serif"));
+        return options;
     }
 
     // ── Line spacing ──────────────────────────────────────────────────────────

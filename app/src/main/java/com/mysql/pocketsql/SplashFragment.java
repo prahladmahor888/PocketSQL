@@ -39,6 +39,10 @@ public class SplashFragment extends Fragment {
     @Override
     public void onViewCreated(@NonNull View view, @Nullable Bundle savedInstanceState) {
         super.onViewCreated(view, savedInstanceState);
+        try {
+            SettingsManager settings = new SettingsManager(requireContext());
+            settings.applyFontToViewTree(view);
+        } catch (Exception ignored) {}
         handler.postDelayed(navigateRunnable, 1500);
     }
 

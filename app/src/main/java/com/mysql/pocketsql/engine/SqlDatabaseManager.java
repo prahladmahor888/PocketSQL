@@ -28,7 +28,7 @@ public class SqlDatabaseManager {
             if (ifNotExists) {
                 return QueryResult.createSuccess("Database already exists (ignored)", 0, 0);
             }
-            return QueryResult.createError("Error: Database '" + dbName + "' already exists");
+            return QueryResult.createError("ERROR 1007 (HY000): Can't create database '" + dbName + "'; database exists");
         }
         engine.storageEngine.createDatabaseDir(dbName);
 
@@ -69,7 +69,7 @@ public class SqlDatabaseManager {
             if (ifExists) {
                 return QueryResult.createSuccess("Database does not exist (ignored)", 0, 0);
             }
-            return QueryResult.createError("Error: Database '" + dbName + "' does not exist");
+            return QueryResult.createError("ERROR 1008 (HY000): Can't drop database '" + dbName + "'; database doesn't exist");
         }
         
         if (dbName.equals(engine.activeDatabaseName)) {
@@ -84,11 +84,11 @@ public class SqlDatabaseManager {
 
     public QueryResult useDatabase(String dbName) throws Exception {
         if (engine.currentUser == null) {
-            throw new Exception("Error: Access denied; you need (at least one of) the USAGE privilege(s) for this operation");
+            throw new Exception("ERROR 1045 (28000): Access denied for user");
         }
         dbName = engine.resolveDatabaseName(dbName);
         if (!engine.storageEngine.databaseExists(dbName)) {
-            return QueryResult.createError("Error: Unknown database '" + dbName + "'");
+            return QueryResult.createError("ERROR 1049 (42000): Unknown database '" + dbName + "'");
         }
         engine.saveDirtyTables();
         engine.activeDatabaseName = dbName;

@@ -268,6 +268,9 @@ public class SqlApiServer {
                 "Access-Control-Allow-Origin: *\r\n" +
                 "Access-Control-Allow-Methods: POST, OPTIONS\r\n" +
                 "Access-Control-Allow-Headers: Content-Type, Authorization\r\n" +
+                "X-Content-Type-Options: nosniff\r\n" +
+                "X-Frame-Options: DENY\r\n" +
+                "Strict-Transport-Security: max-age=31536000; includeSubDomains\r\n" +
                 "Content-Type: application/json; charset=utf-8\r\n" +
                 "Content-Length: " + bodyBytes.length + "\r\n" +
                 "Connection: close\r\n\r\n";

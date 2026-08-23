@@ -3053,5 +3053,48 @@ public class SqlEngineTest {
         engine.execute("DROP DATABASE def_test_db;");
         deleteRecursive(exportDir);
     }
+
+    @Test
+    public void testUpdateWithReplaceFunction() {
+        engine.execute("CREATE DATABASE update_test_db;");
+        engine.execute("USE update_test_db;");
+        engine.execute("CREATE TABLE articles (id INT PRIMARY KEY, content VARCHAR(255), views INT);");
+        engine.execute("INSERT INTO articles VALUES (1, 'hello old_text world', 10), (2, 'sample text without match', 20);");
+
+        // Test UPDATE with REPLACE function
+        QueryResult r1 = engine.execute("UPDATE articles SET content = REPLACE(content, 'old_text', 'new_text') WHERE id = 1;");
+        assertTrue(r1.message, r1.success);
+        assertEquals(1, r1.affectedRows);
+
+        // Verify content updated for id 1
+        QueryResult r2 = engine.execute("SELECT content FROM articles WHERE id = 1;");
+        assertTrue(r2.message, r2.success);
+        assertEquals(1, r2.rows.size());
+        assertEquals("hello new_text world", r2.rows.get(0).get("content"));
+
+        // Verify id 2 unchanged
+        QueryResult r3 = engine.execute("SELECT content FROM articles WHERE id = 2;");
+        assertTrue(r3.message, r3.success);
+        assertEquals("sample text without match", r3.rows.get(0).get("content"));
+
+        // Test UPDATE with arithmetic expression
+        QueryResult r4 = engine.execute("UPDATE articles SET views = views + 5 WHERE id = 1;");
+        assertTrue(r4.message, r4.success);
+        QueryResult r5 = engine.execute("SELECT views FROM articles WHERE id = 1;");
+        assertTrue(r5.message, r5.success);
+        assertEquals(15L, ((Number) r5.rows.get(0).get("views")).longValue());
+
+        // Test unknown column in WHERE clause error
+        QueryResult rUnknown = engine.execute("UPDATE articles SET content = 'test' WHERE invalid_col = 1;");
+        assertFalse(rUnknown.success);
+        assertTrue(rUnknown.message, rUnknown.message.contains("ERROR 1054 (42S22): Unknown column 'invalid_col' in 'where clause'"));
+
+        // Test unknown database error
+        QueryResult rDb = engine.execute("USE non_existing_db;");
+        assertFalse(rDb.success);
+        assertEquals("ERROR 1049 (42000): Unknown database 'non_existing_db'", rDb.message);
+
+        engine.execute("DROP DATABASE update_test_db;");
+    }
 }
 

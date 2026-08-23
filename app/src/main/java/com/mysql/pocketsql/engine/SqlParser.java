@@ -1602,37 +1602,7 @@ public class SqlParser {
 
             expectSymbol("=", "Expected '=' for assignment");
 
-            SqlToken valToken = peek();
-            boolean negative = false;
-            if (valToken.type == SqlToken.Type.SYMBOL && (valToken.value.equals("-") || valToken.value.equals("+"))) {
-                if (valToken.value.equals("-")) {
-                    negative = true;
-                }
-                if (pos + 1 < tokens.size() && tokens.get(pos + 1).type == SqlToken.Type.NUMBER) {
-                    consume(); // Consume '-' or '+'
-                    valToken = peek();
-                }
-            }
-
-            Object value;
-            if (valToken.type == SqlToken.Type.STRING) {
-                consume();
-                value = valToken.value;
-            } else if (valToken.type == SqlToken.Type.NUMBER) {
-                consume();
-                if (valToken.value.contains(".")) {
-                    double num = Double.parseDouble(valToken.value);
-                    value = negative ? -num : num;
-                } else {
-                    long num = Long.parseLong(valToken.value);
-                    value = negative ? -num : num;
-                }
-            } else if (valToken.type == SqlToken.Type.KEYWORD && "NULL".equalsIgnoreCase(valToken.value)) {
-                consume();
-                value = null;
-            } else {
-                throw new SqlSyntaxException("Expected literal value (string, number, or NULL) for assignment", valToken.position);
-            }
+            Object value = parseUpdateValue();
 
             updates.put(colName, value);
 
@@ -1641,6 +1611,95 @@ public class SqlParser {
         Clause.Where where = parseOptionalWhere();
 
         return new Command.Update(tableName, updates, where);
+    }
+
+    private Object parseUpdateValue() throws SqlSyntaxException {
+        SqlToken valToken = peek();
+        boolean negative = false;
+        if (valToken.type == SqlToken.Type.SYMBOL && (valToken.value.equals("-") || valToken.value.equals("+"))) {
+            if (valToken.value.equals("-")) {
+                negative = true;
+            }
+            if (pos + 1 < tokens.size() && tokens.get(pos + 1).type == SqlToken.Type.NUMBER) {
+                SqlToken nextTok = (pos + 2 < tokens.size()) ? tokens.get(pos + 2) : new SqlToken(SqlToken.Type.EOF, "", pos + 2);
+                if (isUpdateDelimiter(nextTok)) {
+                    consume(); // Consume '-' or '+'
+                    SqlToken numTok = consume(); // Consume number
+                    if (numTok.value.contains(".")) {
+                        double num = Double.parseDouble(numTok.value);
+                        return negative ? -num : num;
+                    } else {
+                        long num = Long.parseLong(numTok.value);
+                        return negative ? -num : num;
+                    }
+                }
+            }
+        }
+
+        SqlToken nextTok = (pos + 1 < tokens.size()) ? tokens.get(pos + 1) : new SqlToken(SqlToken.Type.EOF, "", pos + 1);
+        if (isUpdateDelimiter(nextTok)) {
+            if (valToken.type == SqlToken.Type.STRING) {
+                consume();
+                return valToken.value;
+            }
+            if (valToken.type == SqlToken.Type.NUMBER) {
+                consume();
+                if (valToken.value.contains(".")) {
+                    return Double.parseDouble(valToken.value);
+                } else {
+                    return Long.parseLong(valToken.value);
+                }
+            }
+            if (valToken.type == SqlToken.Type.KEYWORD && "NULL".equalsIgnoreCase(valToken.value)) {
+                consume();
+                return null;
+            }
+            if (valToken.type == SqlToken.Type.KEYWORD && "DEFAULT".equalsIgnoreCase(valToken.value)) {
+                consume();
+                return "\u0000DEFAULT\u0000";
+            }
+        }
+
+        // Parse expression
+        StringBuilder exprBuilder = new StringBuilder();
+        int parenDepth = 0;
+        while (peek().type != SqlToken.Type.EOF) {
+            SqlToken t = peek();
+            if (parenDepth == 0 && isUpdateDelimiter(t)) {
+                break;
+            }
+
+            consume();
+            if (t.type == SqlToken.Type.SYMBOL && t.value.equals("(")) {
+                parenDepth++;
+            } else if (t.type == SqlToken.Type.SYMBOL && t.value.equals(")")) {
+                parenDepth--;
+            }
+
+            if (t.type == SqlToken.Type.STRING) {
+                exprBuilder.append(" '").append(t.value.replace("'", "\\'")).append("'");
+            } else {
+                exprBuilder.append(" ").append(t.value);
+            }
+        }
+
+        String expr = exprBuilder.toString().trim();
+        if (expr.isEmpty()) {
+            throw new SqlSyntaxException("Expected value or expression in SET clause", valToken.position);
+        }
+        return "\u0000EXPR\u0000" + expr;
+    }
+
+    private boolean isUpdateDelimiter(SqlToken t) {
+        if (t.type == SqlToken.Type.EOF) return true;
+        if (t.type == SqlToken.Type.SYMBOL && (t.value.equals(",") || t.value.equals(";"))) return true;
+        if (t.type == SqlToken.Type.KEYWORD) {
+            String kw = t.value.toUpperCase();
+            if ("WHERE".equals(kw) || "ORDER".equals(kw) || "LIMIT".equals(kw)) {
+                return true;
+            }
+        }
+        return false;
     }
 
     private Command parseDelete() throws SqlSyntaxException {

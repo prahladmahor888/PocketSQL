@@ -25,6 +25,10 @@ public class MainActivity extends AppCompatActivity {
         
         // Trigger Google Play Integrity check on app startup
         com.mysql.pocketsql.engine.AppIntegrityManager.checkAppIntegrity(this);
+        android.view.View mainView = findViewById(R.id.main);
+        if (mainView != null) {
+            new SettingsManager(this).applyFontToViewTree(mainView);
+        }
         ViewCompat.setOnApplyWindowInsetsListener(findViewById(R.id.main), (v, insets) -> {
             Insets systemBars = insets.getInsets(WindowInsetsCompat.Type.systemBars() | WindowInsetsCompat.Type.ime());
             v.setPadding(systemBars.left, systemBars.top, systemBars.right, systemBars.bottom);

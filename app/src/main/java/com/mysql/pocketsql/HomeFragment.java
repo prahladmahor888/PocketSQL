@@ -25,8 +25,15 @@ import android.widget.HorizontalScrollView;
 import android.widget.LinearLayout;
 import android.widget.RadioGroup;
 import android.widget.ScrollView;
+import android.widget.Spinner;
+import android.widget.ArrayAdapter;
 import android.widget.TextView;
 import android.text.Editable;
+import android.database.Cursor;
+import android.provider.OpenableColumns;
+import java.io.InputStream;
+import java.io.FileOutputStream;
+import java.io.OutputStream;
 import org.json.JSONObject;
 import org.json.JSONArray;
 
@@ -100,6 +107,8 @@ public class HomeFragment extends Fragment {
                     }
                 }
             });
+
+    private AlertDialog activeSettingsDialog;
 
     private static final int LOGIN_STATE_USERNAME = 0;
     private static final int LOGIN_STATE_PASSWORD = 1;
@@ -242,6 +251,9 @@ public class HomeFragment extends Fragment {
     private void setTerminalInputType(int inputType, boolean isPassword) {
         if (etCommandInput == null) return;
         etCommandInput.setInputType(inputType);
+        if (getContext() != null && settings != null) {
+            etCommandInput.setTypeface(settings.getTypeface(requireContext()));
+        }
         if (isPassword) {
             android.view.ActionMode.Callback noOpCallback = new android.view.ActionMode.Callback() {
                 @Override public boolean onCreateActionMode(android.view.ActionMode mode, android.view.Menu menu) { return false; }
@@ -273,7 +285,7 @@ public class HomeFragment extends Fragment {
     private void showCopyDialog() {
         String historyText = tvTerminalHistory.getText().toString();
         if (historyText.isEmpty()) {
-            Toast.makeText(requireContext(), "Terminal history is empty", Toast.LENGTH_SHORT).show();
+            Toast.makeText(requireContext(), R.string.toast_history_empty, Toast.LENGTH_SHORT).show();
             return;
         }
 
@@ -367,6 +379,7 @@ public class HomeFragment extends Fragment {
         buttons.addView(btnCopyAll);
 
         parent.addView(buttons);
+        settings.applyFontToViewTree(parent);
 
         // Create Dialog
         AlertDialog dialog = new AlertDialog.Builder(requireContext())
@@ -384,7 +397,7 @@ public class HomeFragment extends Fragment {
             }
             if (clipboard != null) {
                 com.mysql.pocketsql.engine.AppIntegrityManager.setPrimaryClip(clipboard, clip);
-                Toast.makeText(requireContext(), "Full history copied to clipboard! Will clear in 30 seconds.", Toast.LENGTH_SHORT).show();
+                Toast.makeText(requireContext(), R.string.toast_history_copied, Toast.LENGTH_SHORT).show();
                 
                 // Delayed clear to prevent clipboard credential exposure
                 new android.os.Handler(android.os.Looper.getMainLooper()).postDelayed(() -> {
@@ -483,14 +496,14 @@ public class HomeFragment extends Fragment {
             int portVal = apiServer != null ? apiServer.getActivePort() : 8080;
             String copyUrl = "http://localhost:" + portVal + "/api/query";
             if (apiServer != null && apiServer.getBindErrorMessage() != null) {
-                Toast.makeText(requireContext(), "Cannot copy: Bind failed", Toast.LENGTH_SHORT).show();
+                Toast.makeText(requireContext(), R.string.toast_copy_bind_failed, Toast.LENGTH_SHORT).show();
                 return;
             }
             ClipboardManager clipboard = (ClipboardManager) requireContext().getSystemService(Context.CLIPBOARD_SERVICE);
             ClipData clip = ClipData.newPlainText("PocketSQL Local API URL", copyUrl);
             if (clipboard != null) {
                 com.mysql.pocketsql.engine.AppIntegrityManager.setPrimaryClip(clipboard, clip);
-                Toast.makeText(requireContext(), "Local URL copied!", Toast.LENGTH_SHORT).show();
+                Toast.makeText(requireContext(), R.string.toast_local_url_copied, Toast.LENGTH_SHORT).show();
             }
         });
         localUrlRow.addView(btnCopyLocal);
@@ -519,14 +532,14 @@ public class HomeFragment extends Fragment {
             int portVal = apiServer != null ? apiServer.getActivePort() : 8080;
             String copyUrl = "http://" + hostAddress + ":" + portVal + "/api/query";
             if (apiServer != null && apiServer.getBindErrorMessage() != null) {
-                Toast.makeText(requireContext(), "Cannot copy: Bind failed", Toast.LENGTH_SHORT).show();
+                Toast.makeText(requireContext(), R.string.toast_copy_bind_failed, Toast.LENGTH_SHORT).show();
                 return;
             }
             ClipboardManager clipboard = (ClipboardManager) requireContext().getSystemService(Context.CLIPBOARD_SERVICE);
             ClipData clip = ClipData.newPlainText("PocketSQL Network API URL", copyUrl);
             if (clipboard != null) {
                 com.mysql.pocketsql.engine.AppIntegrityManager.setPrimaryClip(clipboard, clip);
-                Toast.makeText(requireContext(), "Network URL copied!", Toast.LENGTH_SHORT).show();
+                Toast.makeText(requireContext(), R.string.toast_network_url_copied, Toast.LENGTH_SHORT).show();
             }
         });
         networkUrlRow.addView(btnCopyNetwork);
@@ -627,10 +640,10 @@ public class HomeFragment extends Fragment {
             boolean running = apiServer != null && apiServer.isRunning();
             if (running) {
                 stopApiService();
-                Toast.makeText(requireContext(), "API Server stopped", Toast.LENGTH_SHORT).show();
+                Toast.makeText(requireContext(), R.string.toast_api_stopped, Toast.LENGTH_SHORT).show();
             } else {
                 startApiService();
-                Toast.makeText(requireContext(), "API Server started in background", Toast.LENGTH_SHORT).show();
+                Toast.makeText(requireContext(), R.string.toast_api_started, Toast.LENGTH_SHORT).show();
             }
             btnToggleServer.postDelayed(refreshServerUI, 200);
             refreshServerUI.run();
@@ -842,7 +855,7 @@ public class HomeFragment extends Fragment {
                         }
                         if (clipboard != null) {
                             com.mysql.pocketsql.engine.AppIntegrityManager.setPrimaryClip(clipboard, clip);
-                            Toast.makeText(requireContext(), "API Key copied to clipboard! Will clear in 30 seconds.", Toast.LENGTH_SHORT).show();
+                            Toast.makeText(requireContext(), R.string.toast_key_copied, Toast.LENGTH_SHORT).show();
                             
                             // Delayed clear to prevent clipboard credential exposure
                             new android.os.Handler(android.os.Looper.getMainLooper()).postDelayed(() -> {
@@ -873,7 +886,7 @@ public class HomeFragment extends Fragment {
                                 .setMessage("Are you sure you want to delete this API Key? Clients using this key will be blocked immediately.")
                                 .setPositiveButton("Delete", (dialogInterface, which) -> {
                                     apiKeyManager.deleteKey(keyStr);
-                                    Toast.makeText(requireContext(), "API Key deleted!", Toast.LENGTH_SHORT).show();
+                                    Toast.makeText(requireContext(), R.string.toast_key_deleted, Toast.LENGTH_SHORT).show();
                                     run(); // Refresh list!
                                 })
                                 .setNegativeButton("Cancel", null)
@@ -898,7 +911,7 @@ public class HomeFragment extends Fragment {
             }
             apiKeyManager.generateKey(label);
             etKeyLabel.setText("");
-            Toast.makeText(requireContext(), "New API Key generated!", Toast.LENGTH_SHORT).show();
+            Toast.makeText(requireContext(), R.string.toast_key_generated, Toast.LENGTH_SHORT).show();
             repopulate.run(); // Refresh list!
         });
 
@@ -1023,43 +1036,48 @@ public class HomeFragment extends Fragment {
         int fontSizeSp  = settings.getFontSizeSp();
         float lineSpacing = settings.getLineSpacingExtra();
 
+        Typeface tf = settings.getTypeface(requireContext());
+
         // Background
         scrollContainer.setBackgroundColor(bgColor);
         layoutTerminalContainer.setBackgroundColor(bgColor);
+
+        // Apply font to entire HomeFragment layout view tree!
+        if (getView() != null) {
+            settings.applyFontToViewTree(getView());
+        }
 
         // Terminal history text
         tvTerminalHistory.setTextColor(textColor);
         tvTerminalHistory.setTextSize(TypedValue.COMPLEX_UNIT_SP, fontSizeSp);
         tvTerminalHistory.setLineSpacing(lineSpacing, 1f);
-        if (jetbrainsMono != null) {
-            tvTerminalHistory.setTypeface(jetbrainsMono);
-        } else {
-            tvTerminalHistory.setTypeface(Typeface.MONOSPACE);
-        }
+        tvTerminalHistory.setTypeface(tf);
         tvTerminalHistory.setLetterSpacing(0.0f);
+        tvTerminalHistory.setSingleLine(false);
+        tvTerminalHistory.setMaxLines(Integer.MAX_VALUE);
         tvTerminalHistory.setHorizontallyScrolling(true);
+
+        ViewGroup.LayoutParams lp = tvTerminalHistory.getLayoutParams();
+        if (lp != null) {
+            lp.width = ViewGroup.LayoutParams.WRAP_CONTENT;
+            tvTerminalHistory.setLayoutParams(lp);
+        }
 
         // Prompt
         tvTerminalPrompt.setTextColor(promptColor);
         tvTerminalPrompt.setTextSize(TypedValue.COMPLEX_UNIT_SP, fontSizeSp);
-        if (jetbrainsMono != null) {
-            tvTerminalPrompt.setTypeface(Typeface.create(jetbrainsMono, Typeface.BOLD));
-        } else {
-            tvTerminalPrompt.setTypeface(Typeface.MONOSPACE, Typeface.BOLD);
+        try {
+            tvTerminalPrompt.setTypeface(Typeface.create(tf, Typeface.BOLD));
+        } catch (Exception e) {
+            tvTerminalPrompt.setTypeface(tf, Typeface.BOLD);
         }
         tvTerminalPrompt.setLetterSpacing(0.0f);
 
         // Input field
         etCommandInput.setTextColor(textColor);
         etCommandInput.setTextSize(TypedValue.COMPLEX_UNIT_SP, fontSizeSp);
-        if (jetbrainsMono != null) {
-            etCommandInput.setTypeface(jetbrainsMono);
-        } else {
-            etCommandInput.setTypeface(Typeface.MONOSPACE);
-        }
+        etCommandInput.setTypeface(tf);
         etCommandInput.setLetterSpacing(0.0f);
-
-
 
         // Update prompt string only when authenticated
         if (loginState == LOGIN_STATE_AUTHENTICATED) {
@@ -1073,6 +1091,7 @@ public class HomeFragment extends Fragment {
 
         // ── Bind dialog views ────────────────────────────────────────────
         RadioGroup rgTheme        = dialogView.findViewById(R.id.rgTheme);
+        Spinner spFontFamily      = dialogView.findViewById(R.id.spFontFamily);
         RadioGroup rgFontSize     = dialogView.findViewById(R.id.rgFontSize);
         RadioGroup rgLineSpacing  = dialogView.findViewById(R.id.rgLineSpacing);
         RadioGroup rgPrompt       = dialogView.findViewById(R.id.rgPrompt);
@@ -1083,10 +1102,48 @@ public class HomeFragment extends Fragment {
         TextView btnExport        = dialogView.findViewById(R.id.btnExportDatabase);
         TextView btnImport        = dialogView.findViewById(R.id.btnImportDatabase);
 
+        settings.applyFontToViewTree(dialogView);
+
         // ── Restore current values ───────────────────────────────────────
         int[] themeIds = {R.id.rbThemeClassic, R.id.rbThemeMatrix,
                           R.id.rbThemeOcean,   R.id.rbThemeDracula};
         rgTheme.check(themeIds[settings.getTheme()]);
+
+        // Populate font family spinner
+        List<SettingsManager.FontOption> fontOptions = settings.getAvailableFontOptions(requireContext());
+        ArrayAdapter<SettingsManager.FontOption> fontAdapter =
+            new ArrayAdapter<SettingsManager.FontOption>(requireContext(), android.R.layout.simple_spinner_item, fontOptions) {
+                @NonNull
+                @Override
+                public View getView(int position, @Nullable View convertView, @NonNull ViewGroup parent) {
+                    View v = super.getView(position, convertView, parent);
+                    if (v instanceof TextView) {
+                        ((TextView) v).setTextColor(Color.WHITE);
+                        ((TextView) v).setTextSize(TypedValue.COMPLEX_UNIT_SP, 13);
+                    }
+                    return v;
+                }
+                @Override
+                public View getDropDownView(int position, @Nullable View convertView, @NonNull ViewGroup parent) {
+                    View v = super.getDropDownView(position, convertView, parent);
+                    if (v instanceof TextView) {
+                        ((TextView) v).setTextColor(Color.WHITE);
+                        ((TextView) v).setBackgroundColor(Color.parseColor("#12131C"));
+                        ((TextView) v).setPadding(24, 20, 24, 20);
+                    }
+                    return v;
+                }
+            };
+        fontAdapter.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item);
+        spFontFamily.setAdapter(fontAdapter);
+
+        String currentFamily = settings.getFontFamily();
+        for (int i = 0; i < fontOptions.size(); i++) {
+            if (fontOptions.get(i).value.equals(currentFamily)) {
+                spFontFamily.setSelection(i);
+                break;
+            }
+        }
 
         int[] fontIds = {R.id.rbFont12, R.id.rbFont14, R.id.rbFont16, R.id.rbFont18};
         rgFontSize.check(fontIds[settings.getFontSizeIndex()]);
@@ -1104,6 +1161,7 @@ public class HomeFragment extends Fragment {
         AlertDialog dialog = new AlertDialog.Builder(requireContext())
             .setView(dialogView)
             .create();
+        activeSettingsDialog = dialog;
 
         // ── Wire custom buttons ──────────────────────────────────────────
         btnApply.setOnClickListener(v -> {
@@ -1111,6 +1169,11 @@ public class HomeFragment extends Fragment {
             int checkedTheme = rgTheme.getCheckedRadioButtonId();
             for (int i = 0; i < themeIds.length; i++) {
                 if (themeIds[i] == checkedTheme) { settings.setTheme(i); break; }
+            }
+            // Save font family
+            SettingsManager.FontOption selectedFont = (SettingsManager.FontOption) spFontFamily.getSelectedItem();
+            if (selectedFont != null) {
+                settings.setFontFamily(selectedFont.value);
             }
             // Save font size
             int checkedFont = rgFontSize.getCheckedRadioButtonId();
@@ -1140,7 +1203,7 @@ public class HomeFragment extends Fragment {
         btnExport.setOnClickListener(v -> {
             String activeDb = engine.getActiveDatabase();
             if (activeDb == null || activeDb.isEmpty()) {
-                Toast.makeText(requireContext(), "Please SELECT or USE a database first", Toast.LENGTH_SHORT).show();
+                Toast.makeText(requireContext(), R.string.toast_select_db_first, Toast.LENGTH_SHORT).show();
                 return;
             }
             
@@ -1183,6 +1246,7 @@ public class HomeFragment extends Fragment {
     private void showTemplatePicker() {
         View dialogView = LayoutInflater.from(requireContext())
                 .inflate(R.layout.dialog_templates, null);
+        settings.applyFontToViewTree(dialogView);
 
         TextView btnClose = dialogView.findViewById(R.id.btnTemplateClose);
         EditText etSearch = dialogView.findViewById(R.id.etTemplateSearch);
@@ -2158,27 +2222,47 @@ public class HomeFragment extends Fragment {
                     if (onComplete != null) onComplete.run();
                 } else {
                     // Fetch query - animate output!
-                    // Compute column widths by splitting multiline cell values
-                    int[] widths = new int[res.columns.size()];
+                    android.text.TextPaint paint = (tvTerminalHistory != null) ? tvTerminalHistory.getPaint() : new android.text.TextPaint();
+                    float spacePx = (paint != null) ? paint.measureText(" ") : 8f;
+                    if (spacePx <= 0) spacePx = 8f;
+                    float dashPx = (paint != null) ? paint.measureText("-") : 10f;
+                    if (dashPx <= 0) dashPx = 10f;
+
+                    float[] targetContentPx = new float[res.columns.size()];
+                    int[] colDashCounts = new int[res.columns.size()];
+
                     for (int i = 0; i < res.columns.size(); i++) {
-                        widths[i] = res.columns.get(i).length();
-                    }
-                    for (Map<String, Object> row : res.rows) {
-                        for (int i = 0; i < res.columns.size(); i++) {
+                        float maxContentPx = paint.measureText(res.columns.get(i));
+                        for (Map<String, Object> row : res.rows) {
                             Object val = row.get(res.columns.get(i));
                             String str = (val == null) ? "NULL" : val.toString().replace("\r", "").replace("\t", "    ");
                             String[] lines = str.split("\n", -1);
                             for (String lineStr : lines) {
-                                if (lineStr.length() > widths[i]) {
-                                    widths[i] = lineStr.length();
+                                float w = paint.measureText(lineStr);
+                                if (w > maxContentPx) {
+                                    maxContentPx = w;
                                 }
                             }
                         }
+                        int dashCount = Math.max(1, Math.round((maxContentPx + (2 * spacePx)) / dashPx));
+                        colDashCounts[i] = dashCount;
+                        targetContentPx[i] = (dashCount * dashPx) - (2 * spacePx);
+                        if (targetContentPx[i] < maxContentPx) {
+                            targetContentPx[i] = maxContentPx;
+                        }
                     }
-                    String border = buildBorderLine(widths);
+
+                    StringBuilder borderSb = new StringBuilder("+");
+                    for (int count : colDashCounts) {
+                        for (int d = 0; d < count; d++) {
+                            borderSb.append("-");
+                        }
+                        borderSb.append("+");
+                    }
+                    String border = borderSb.toString();
                     double executionTimeSec = res.executionTimeMs / 1000.0;
                     
-                    animateTableOutput(res.columns, res.rows, widths, border, promptTxt, line, res.rows.size(), executionTimeSec, onComplete);
+                    animateTableOutput(res.columns, res.rows, targetContentPx, border, paint, promptTxt, line, res.rows.size(), executionTimeSec, onComplete);
                 }
             } else {
                 // DML / DDL Output
@@ -2221,25 +2305,46 @@ public class HomeFragment extends Fragment {
         }
     }
 
-    private void animateTableOutput(final List<String> columns, final List<Map<String, Object>> rows, final int[] widths, final String border, String promptTxt, String line, final int rowCount, final double executionTimeSec, final Runnable onComplete) {
+    private void appendTableGridText(CharSequence text) {
+        tvTerminalHistory.append(text);
+    }
+
+    private String padCellForFont(String s, float targetContentPx, android.text.TextPaint paint) {
+        if (s == null) s = "";
+        if (paint == null) return s;
+        float currentPx = paint.measureText(s);
+        if (currentPx >= targetContentPx) return s;
+        float spacePx = paint.measureText(" ");
+        if (spacePx <= 0) spacePx = 8f;
+        int spacesNeeded = Math.max(0, Math.round((targetContentPx - currentPx) / spacePx));
+        StringBuilder sb = new StringBuilder(s);
+        for (int k = 0; k < spacesNeeded; k++) {
+            sb.append(" ");
+        }
+        return sb.toString();
+    }
+
+    private void animateTableOutput(final List<String> columns, final List<Map<String, Object>> rows, final float[] targetContentPx, final String border, final android.text.TextPaint paint, String promptTxt, String line, final int rowCount, final double executionTimeSec, final Runnable onComplete) {
         final android.os.Handler handler = new android.os.Handler(android.os.Looper.getMainLooper());
         
-        // 1. Print header section immediately
+        // 1. Print prompt + query line using user's font
+        tvTerminalHistory.append(promptTxt + line + "\n");
+
+        // 2. Print header table grid
         StringBuilder headerSb = new StringBuilder();
-        headerSb.append(promptTxt).append(line).append("\n");
         headerSb.append(border).append("\n");
         headerSb.append("|");
         for (int i = 0; i < columns.size(); i++) {
-            headerSb.append(" ").append(padRight(columns.get(i), widths[i])).append(" |");
+            headerSb.append(" ").append(padCellForFont(columns.get(i), targetContentPx[i], paint)).append(" |");
         }
         headerSb.append("\n").append(border).append("\n");
-        tvTerminalHistory.append(headerSb.toString());
+        appendTableGridText(headerSb.toString());
         
         if (settings.isAutoScroll()) {
             scrollContainer.post(() -> scrollContainer.fullScroll(View.FOCUS_DOWN));
         }
 
-        // 2. Animate rows
+        // 3. Animate rows
         final int delayMs = 15; // Animation speed: 15ms per row
         for (int i = 0; i < rows.size(); i++) {
             final int rowIndex = i;
@@ -2270,11 +2375,11 @@ public class HomeFragment extends Fragment {
                         for (int j = 0; j < columns.size(); j++) {
                             String[] lines = cellLines.get(j);
                             String lineText = (l < lines.length) ? lines[l] : "";
-                            rowSb.append(" ").append(padRight(lineText, widths[j])).append(" |");
+                            rowSb.append(" ").append(padCellForFont(lineText, targetContentPx[j], paint)).append(" |");
                         }
                         rowSb.append("\n");
                     }
-                    tvTerminalHistory.append(rowSb.toString());
+                    appendTableGridText(rowSb.toString());
                     
                     if (settings.isAutoScroll()) {
                         scrollContainer.fullScroll(View.FOCUS_DOWN);
@@ -2282,12 +2387,13 @@ public class HomeFragment extends Fragment {
                     
                     // Finalize animation on the last row
                     if (rowIndex == rows.size() - 1) {
-                        StringBuilder footerSb = new StringBuilder(border).append("\n");
+                        appendTableGridText(border + "\n");
+
                         String timeStr = String.format("%.2f", executionTimeSec);
-                        footerSb.append(String.valueOf(rowCount))
-                                .append(rowCount == 1 ? " row in set (" : " rows in set (")
-                                .append(timeStr).append(" sec)\n\n");
-                        tvTerminalHistory.append(footerSb.toString());
+                        String footerMsg = String.valueOf(rowCount)
+                                + (rowCount == 1 ? " row in set (" : " rows in set (")
+                                + timeStr + " sec)\n\n";
+                        tvTerminalHistory.append(footerMsg);
                         
                         etCommandInput.setEnabled(true);
                         refreshTerminalPrompt();
@@ -2338,32 +2444,51 @@ public class HomeFragment extends Fragment {
     // ASCII layout utility
     private String formatAsciiTable(List<String> columns, List<Map<String, Object>> rows) {
         if (columns == null || columns.isEmpty()) return "";
+        android.text.TextPaint paint = (tvTerminalHistory != null) ? tvTerminalHistory.getPaint() : new android.text.TextPaint();
+        float spacePx = (paint != null) ? paint.measureText(" ") : 8f;
+        if (spacePx <= 0) spacePx = 8f;
+        float dashPx = (paint != null) ? paint.measureText("-") : 10f;
+        if (dashPx <= 0) dashPx = 10f;
 
-        int[] widths = new int[columns.size()];
+        float[] targetContentPx = new float[columns.size()];
+        int[] colDashCounts = new int[columns.size()];
+
         for (int i = 0; i < columns.size(); i++) {
-            widths[i] = columns.get(i).length();
-        }
-
-        for (Map<String, Object> row : rows) {
-            for (int i = 0; i < columns.size(); i++) {
+            float maxContentPx = paint.measureText(columns.get(i));
+            for (Map<String, Object> row : rows) {
                 Object val = row.get(columns.get(i));
                 String str = (val == null) ? "NULL" : val.toString().replace("\r", "").replace("\t", "    ");
                 String[] lines = str.split("\n", -1);
                 for (String lineStr : lines) {
-                    if (lineStr.length() > widths[i]) {
-                        widths[i] = lineStr.length();
+                    float w = paint.measureText(lineStr);
+                    if (w > maxContentPx) {
+                        maxContentPx = w;
                     }
                 }
             }
+            int dashCount = Math.max(1, Math.round((maxContentPx + (2 * spacePx)) / dashPx));
+            colDashCounts[i] = dashCount;
+            targetContentPx[i] = (dashCount * dashPx) - (2 * spacePx);
+            if (targetContentPx[i] < maxContentPx) {
+                targetContentPx[i] = maxContentPx;
+            }
         }
 
+        StringBuilder borderSb = new StringBuilder("+");
+        for (int count : colDashCounts) {
+            for (int d = 0; d < count; d++) {
+                borderSb.append("-");
+            }
+            borderSb.append("+");
+        }
+        String border = borderSb.toString();
+
         StringBuilder sb = new StringBuilder();
-        String border = buildBorderLine(widths);
         sb.append(border).append("\n");
 
         sb.append("|");
         for (int i = 0; i < columns.size(); i++) {
-            sb.append(" ").append(padRight(columns.get(i), widths[i])).append(" |");
+            sb.append(" ").append(padCellForFont(columns.get(i), targetContentPx[i], paint)).append(" |");
         }
         sb.append("\n").append(border).append("\n");
 
@@ -2385,7 +2510,7 @@ public class HomeFragment extends Fragment {
                 for (int j = 0; j < columns.size(); j++) {
                     String[] lines = cellLines.get(j);
                     String lineText = (l < lines.length) ? lines[l] : "";
-                    sb.append(" ").append(padRight(lineText, widths[j])).append(" |");
+                    sb.append(" ").append(padCellForFont(lineText, targetContentPx[j], paint)).append(" |");
                 }
                 sb.append("\n");
             }
@@ -2393,22 +2518,6 @@ public class HomeFragment extends Fragment {
         sb.append(border).append("\n");
 
         return sb.toString();
-    }
-
-    private String buildBorderLine(int[] widths) {
-        StringBuilder sb = new StringBuilder("+");
-        for (int w : widths) {
-            for (int i = 0; i < w + 2; i++) {
-                sb.append("-");
-            }
-            sb.append("+");
-        }
-        return sb.toString();
-    }
-
-    private String padRight(String s, int n) {
-        if (s.length() >= n) return s;
-        return String.format("%-" + n + "s", s);
     }
 
     // ── Categorized SQL Templates Helpers ─────────────────────────────────────
@@ -2549,11 +2658,11 @@ public class HomeFragment extends Fragment {
     private void performExport(android.net.Uri uri) {
         String activeDb = engine.getActiveDatabase();
         if (activeDb == null || activeDb.isEmpty()) {
-            Toast.makeText(requireContext(), "No active database to export", Toast.LENGTH_SHORT).show();
+            Toast.makeText(requireContext(), R.string.toast_no_db_export, Toast.LENGTH_SHORT).show();
             return;
         }
 
-        Toast.makeText(requireContext(), "Exporting database...", Toast.LENGTH_SHORT).show();
+        Toast.makeText(requireContext(), R.string.toast_exporting_db, Toast.LENGTH_SHORT).show();
 
         new Thread(() -> {
             try {
@@ -2563,13 +2672,13 @@ public class HomeFragment extends Fragment {
                 }
                 if (getActivity() != null) {
                     getActivity().runOnUiThread(() -> {
-                        Toast.makeText(requireContext(), "Database '" + activeDb + "' exported successfully!", Toast.LENGTH_LONG).show();
+                        Toast.makeText(requireContext(), getString(R.string.toast_export_success, activeDb), Toast.LENGTH_LONG).show();
                     });
                 }
             } catch (Exception e) {
                 if (getActivity() != null) {
                     getActivity().runOnUiThread(() -> {
-                        Toast.makeText(requireContext(), "Export failed: " + e.getMessage(), Toast.LENGTH_LONG).show();
+                        Toast.makeText(requireContext(), getString(R.string.toast_export_failed, e.getMessage()), Toast.LENGTH_LONG).show();
                     });
                 }
             }
@@ -2605,7 +2714,7 @@ public class HomeFragment extends Fragment {
             .setPositiveButton("Import", (dialog, which) -> {
                 String dbName = etInput.getText().toString().trim().replaceAll("[^a-zA-Z0-9_]", "");
                 if (dbName.isEmpty()) {
-                    Toast.makeText(requireContext(), "Invalid database name", Toast.LENGTH_SHORT).show();
+                    Toast.makeText(requireContext(), R.string.toast_invalid_db_name, Toast.LENGTH_SHORT).show();
                     return;
                 }
                 startImportTask(uri, dbName);
@@ -2615,7 +2724,7 @@ public class HomeFragment extends Fragment {
     }
 
     private void startImportTask(android.net.Uri uri, String dbName) {
-        Toast.makeText(requireContext(), "Importing database...", Toast.LENGTH_SHORT).show();
+        Toast.makeText(requireContext(), R.string.toast_importing_db, Toast.LENGTH_SHORT).show();
         new Thread(() -> {
             try {
                 try (android.os.ParcelFileDescriptor pfd = requireContext().getContentResolver().openFileDescriptor(uri, "r");
@@ -2624,14 +2733,14 @@ public class HomeFragment extends Fragment {
                 }
                 if (getActivity() != null) {
                     getActivity().runOnUiThread(() -> {
-                        Toast.makeText(requireContext(), "Database '" + dbName + "' imported successfully!", Toast.LENGTH_LONG).show();
+                        Toast.makeText(requireContext(), getString(R.string.toast_import_success, dbName), Toast.LENGTH_LONG).show();
                         refreshTerminalPrompt();
                     });
                 }
             } catch (Exception e) {
                 if (getActivity() != null) {
                     getActivity().runOnUiThread(() -> {
-                        Toast.makeText(requireContext(), "Import failed: " + e.getMessage(), Toast.LENGTH_LONG).show();
+                        Toast.makeText(requireContext(), getString(R.string.toast_import_failed, e.getMessage()), Toast.LENGTH_LONG).show();
                     });
                 }
             }
@@ -2661,6 +2770,7 @@ public class HomeFragment extends Fragment {
     }
     private void showConnectionsDialog() {
         android.view.View dialogView = getLayoutInflater().inflate(R.layout.dialog_connections, null);
+        settings.applyFontToViewTree(dialogView);
         AlertDialog dialog = new AlertDialog.Builder(requireContext())
                 .setView(dialogView)
                 .create();
@@ -2678,7 +2788,7 @@ public class HomeFragment extends Fragment {
             String p = etPassword.getText().toString();
             String h = "localhost"; // default host
             if (u.isEmpty()) {
-                Toast.makeText(requireContext(), "Username required", Toast.LENGTH_SHORT).show();
+                Toast.makeText(requireContext(), R.string.toast_username_required, Toast.LENGTH_SHORT).show();
                 return;
             }
             dialog.dismiss();
@@ -2694,7 +2804,7 @@ public class HomeFragment extends Fragment {
                 settings.setAutoLogin(true);
                 settings.saveConnection(u, h, p);
             } else {
-                Toast.makeText(requireContext(), "Authentication failed.", Toast.LENGTH_SHORT).show();
+                Toast.makeText(requireContext(), R.string.toast_auth_failed, Toast.LENGTH_SHORT).show();
             }
         });
 
@@ -2739,7 +2849,7 @@ public class HomeFragment extends Fragment {
                         settings.setLastPassword(finalPass);
                         settings.setAutoLogin(true);
                     } else {
-                        Toast.makeText(requireContext(), "Authentication failed for saved connection.", Toast.LENGTH_SHORT).show();
+                        Toast.makeText(requireContext(), R.string.toast_saved_auth_failed, Toast.LENGTH_SHORT).show();
                     }
                 });
                 row.addView(btnConnect);
@@ -2780,7 +2890,7 @@ public class HomeFragment extends Fragment {
                 .setMessage("Do you want to save this connection for quick access?")
                 .setPositiveButton("Save", (d, w) -> {
                     settings.saveConnection(username, host, password);
-                    Toast.makeText(requireContext(), "Connection saved!", Toast.LENGTH_SHORT).show();
+                    Toast.makeText(requireContext(), R.string.toast_conn_saved, Toast.LENGTH_SHORT).show();
                 })
                 .setNegativeButton("No", null)
                 .show();

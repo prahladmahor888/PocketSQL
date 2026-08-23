@@ -275,10 +275,14 @@ public class DatabaseEngine {
                 duration
             );
         } catch (SqlSyntaxException e) {
-            return QueryResult.createError("Syntax Error: " + e.getMessage());
+            return QueryResult.createError("ERROR 1064 (42000): You have an error in your SQL syntax; check the manual that corresponds to your MySQL server version for the right syntax near '" + e.getMessage() + "'");
         } catch (Throwable e) {
             com.mysql.pocketsql.engine.SqlLog.printStackTrace(e);
-            return QueryResult.createError("Database Error: " + e.getMessage());
+            String msg = e.getMessage() != null ? e.getMessage() : "Unknown error";
+            if (msg.startsWith("ERROR ") || msg.startsWith("ERROR:")) {
+                return QueryResult.createError(msg);
+            }
+            return QueryResult.createError("ERROR 1105 (HY000): " + msg);
         }
     }
 
@@ -3016,6 +3020,10 @@ public class DatabaseEngine {
 
         // 2. Filter rows using WHERE
         if (select.where != null) {
+            if (joinedRows != null && !joinedRows.isEmpty()) {
+                List<String> availCols = new ArrayList<>(joinedRows.get(0).keySet());
+                validateWhereColumns(select.where, availCols);
+            }
             List<Map<String, Object>> filtered = new ArrayList<>();
             String collation = resolveCollation(select.tableName, select.where.column);
             for (Map<String, Object> row : joinedRows) {
@@ -3327,17 +3335,15 @@ public class DatabaseEngine {
         verifyPrivilege("UPDATE", activeDatabaseName, tableName);
         TableData td = getOrLoadTable(tableName);
 
-        // Validate update columns and types
-        Map<String, Object> validatedUpdates = new HashMap<>();
-        for (Map.Entry<String, Object> entry : updates.entrySet()) {
-            String col = entry.getKey();
+        // Validate update column existence
+        for (String col : updates.keySet()) {
             int idx = td.columns.indexOf(col);
             if (idx == -1) {
                 throw new Exception("Error: Unknown column '" + col + "' in SET clause");
             }
-            String type = td.types.get(idx);
-            Object validated = validateAndConvertType(col, entry.getValue(), type);
-            validatedUpdates.put(col, validated);
+        }
+        if (where != null) {
+            validateWhereColumns(where, td.columns);
         }
 
         // Identify columns that need auto-update on row changes
@@ -3352,7 +3358,7 @@ public class DatabaseEngine {
                     String col = keys.next();
                     Object val = onUpdateObj.get(col);
                     if (val != JSONObject.NULL && val != null && SqlDefaults.isCurrentTimestampFunction(val.toString())) {
-                        if (!validatedUpdates.containsKey(col)) {
+                        if (!updates.containsKey(col)) {
                             autoUpdateCols.add(col);
                         }
                     }
@@ -3365,8 +3371,22 @@ public class DatabaseEngine {
         for (Map<String, Object> row : td.rows) {
             if (where == null || where.evaluate(row, collation, this)) {
                 Map<String, Object> updatedRow = new HashMap<>(row);
-                for (Map.Entry<String, Object> entry : validatedUpdates.entrySet()) {
-                    updatedRow.put(entry.getKey(), entry.getValue());
+                for (Map.Entry<String, Object> entry : updates.entrySet()) {
+                    String col = entry.getKey();
+                    int idx = td.columns.indexOf(col);
+                    String type = td.types.get(idx);
+                    Object rawVal = entry.getValue();
+                    Object valToAssign;
+                    if (rawVal instanceof String && ((String) rawVal).startsWith("\u0000EXPR\u0000")) {
+                        String exprStr = ((String) rawVal).substring("\u0000EXPR\u0000".length());
+                        valToAssign = SqlFunctions.evaluate(exprStr, row, this);
+                    } else if ("\u0000DEFAULT\u0000".equals(rawVal)) {
+                        valToAssign = getDefaultValue(tableName, col);
+                    } else {
+                        valToAssign = rawVal;
+                    }
+                    Object validated = validateAndConvertType(col, valToAssign, type);
+                    updatedRow.put(col, validated);
                 }
                 if (!autoUpdateCols.isEmpty()) {
                     String currentTs = SqlDefaults.getCurrentTimestampString();
@@ -3420,6 +3440,54 @@ public class DatabaseEngine {
         }
 
         return QueryResult.createSuccess("Query OK, " + affected + " row" + (affected == 1 ? "" : "s") + " affected", affected, 0);
+    }
+
+    public void validateWhereColumns(Clause.Where where, List<String> validColumns) throws Exception {
+        if (where == null || validColumns == null || validColumns.isEmpty()) return;
+        if (where.logicalOperator != null && where.subConditions != null) {
+            for (Clause.Where sub : where.subConditions) {
+                validateWhereColumns(sub, validColumns);
+            }
+            return;
+        }
+        if (where.column != null && !where.column.isEmpty()) {
+            validateSingleWhereColumn(where.column, validColumns);
+        }
+        if (where.isValueColumn && where.value instanceof String) {
+            String valStr = (String) where.value;
+            if (!valStr.startsWith("@") && !valStr.contains("(")) {
+                validateSingleWhereColumn(valStr, validColumns);
+            }
+        }
+    }
+
+    private void validateSingleWhereColumn(String colExpr, List<String> validColumns) throws Exception {
+        if (colExpr == null || colExpr.startsWith("@") || colExpr.contains("(")) {
+            return;
+        }
+        String cleanCol = colExpr;
+        int lastDot = cleanCol.lastIndexOf('.');
+        if (lastDot != -1) {
+            cleanCol = cleanCol.substring(lastDot + 1);
+        }
+        cleanCol = cleanCol.trim();
+        if (cleanCol.isEmpty() || "*".equals(cleanCol)) return;
+
+        boolean found = false;
+        for (String valid : validColumns) {
+            String cleanValid = valid;
+            int dotIdx = cleanValid.lastIndexOf('.');
+            if (dotIdx != -1) {
+                cleanValid = cleanValid.substring(dotIdx + 1);
+            }
+            if (cleanValid.equalsIgnoreCase(cleanCol)) {
+                found = true;
+                break;
+            }
+        }
+        if (!found) {
+            throw new Exception("ERROR 1054 (42S22): Unknown column '" + colExpr + "' in 'where clause'");
+        }
     }
 
     public QueryResult createUser(String username, String host, String password) throws Exception {

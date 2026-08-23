@@ -6,9 +6,9 @@ import java.util.*;
 
 public class PocketSQL {
 
-    static final String BASE_URL = "http://<mobile_ip>:<active_port>/api/query";
-    static final String API_KEY = "<your_api_key>";
-    static final String DATABASE = "<your_database_name>";
+    static final String BASE_URL = System.getenv("POCKETSQL_URL") != null ? System.getenv("POCKETSQL_URL") : "http://<mobile_ip>:<active_port>/api/query";
+    static final String API_KEY = System.getenv("POCKETSQL_API_KEY") != null ? System.getenv("POCKETSQL_API_KEY") : "<your_api_key>";
+    static final String DATABASE = System.getenv("POCKETSQL_DATABASE") != null ? System.getenv("POCKETSQL_DATABASE") : "<your_database_name>";
 
     static final HttpClient client = HttpClient.newHttpClient();
     static final Scanner scanner = new Scanner(System.in);
