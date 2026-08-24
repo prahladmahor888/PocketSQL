@@ -275,7 +275,7 @@ public class DatabaseEngine {
                 duration
             );
         } catch (SqlSyntaxException e) {
-            return QueryResult.createError("ERROR 1064 (42000): You have an error in your SQL syntax; check the manual that corresponds to your MySQL server version for the right syntax near '" + e.getMessage() + "'");
+            return QueryResult.createError("ERROR 1064 (42000): You have an error in your SQL syntax; check the manual that corresponds to your PocketSQL server version for the right syntax near '" + e.getMessage() + "'");
         } catch (Throwable e) {
             com.mysql.pocketsql.engine.SqlLog.printStackTrace(e);
             String msg = e.getMessage() != null ? e.getMessage() : "Unknown error";

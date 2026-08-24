@@ -125,15 +125,20 @@ public class HomeFragment extends Fragment {
     private String setupHost = com.mysql.pocketsql.engine.SecurityHelper.getDefaultHost();
     private String setupPassword = "";
 
-    private static final String WELCOME_TEXT = getWelcomeText();
-
-    private static String getWelcomeText() {
+    private String getWelcomeText() {
+        String ver = "1.0.1";
+        if (getContext() != null) {
+            try {
+                ver = getContext().getPackageManager().getPackageInfo(getContext().getPackageName(), 0).versionName;
+            } catch (Exception ignored) {}
+        }
         return
                 "PocketSQL Monitor\n" +
-                        "Version " + BuildConfig.VERSION_NAME + "\n" +
-                        "Connected to local SQL engine.\n\n" +
+                        "Server version: PocketSQL " + ver + " (PocketSQL Server)\n" +
+                        "App Version: " + ver + "\n" +
+                        "Connected to local PocketSQL engine.\n\n" +
 
-                        "Ready for SQL commands.\n" +
+                        "Ready for PocketSQL commands.\n" +
                         "Statements must end with ';' or '\\g'.\n\n" +
 
                         "Type 'help;' or '\\h' for help.\n" +
@@ -190,7 +195,7 @@ public class HomeFragment extends Fragment {
             String savedPass = settings.getLastPassword();
             if (engine.authenticate(savedUser, savedPass)) {
                 loginState = LOGIN_STATE_AUTHENTICATED;
-                tvTerminalHistory.setText(WELCOME_TEXT);
+                tvTerminalHistory.setText(getWelcomeText());
                 refreshTerminalPrompt();
                 setTerminalInputType(android.text.InputType.TYPE_CLASS_TEXT, false);
                 loggedIn = true;
@@ -213,6 +218,18 @@ public class HomeFragment extends Fragment {
         layoutTerminalContainer = v.findViewById(R.id.layoutTerminalContainer);
         specialKeysContainer = v.findViewById(R.id.specialKeysContainer);
         tvTerminalHistory = v.findViewById(R.id.tvTerminalHistory);
+        tvTerminalHistory.setFocusable(false);
+        tvTerminalHistory.setFocusableInTouchMode(false);
+        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.M) {
+            tvTerminalHistory.setCustomSelectionActionModeCallback(new android.view.ActionMode.Callback() {
+                @Override public boolean onCreateActionMode(android.view.ActionMode mode, android.view.Menu menu) { return true; }
+                @Override public boolean onPrepareActionMode(android.view.ActionMode mode, android.view.Menu menu) { return false; }
+                @Override public boolean onActionItemClicked(android.view.ActionMode mode, android.view.MenuItem item) { return false; }
+                @Override public void onDestroyActionMode(android.view.ActionMode mode) {
+                    resetHistoryFocus();
+                }
+            });
+        }
         tvTerminalPrompt = v.findViewById(R.id.tvTerminalPrompt);
         etCommandInput = v.findViewById(R.id.etCommandInput);
         btnHistoryUp   = v.findViewById(R.id.btnHistoryUp);
@@ -227,6 +244,21 @@ public class HomeFragment extends Fragment {
         btnConnections = v.findViewById(R.id.btnConnections);
         suggestionsBar = v.findViewById(R.id.suggestionsBar);
         suggestionsContainer = v.findViewById(R.id.suggestionsContainer);
+    }
+
+    private void resetHistoryFocus() {
+        if (tvTerminalHistory != null) {
+            tvTerminalHistory.setTextIsSelectable(false);
+            tvTerminalHistory.setFocusable(false);
+            tvTerminalHistory.setFocusableInTouchMode(false);
+        }
+        if (etCommandInput != null) {
+            etCommandInput.setFocusable(true);
+            etCommandInput.setFocusableInTouchMode(true);
+            etCommandInput.setEnabled(true);
+            etCommandInput.requestFocus();
+            showKeyboard();
+        }
     }
 
     private void refreshTerminalPrompt() {
@@ -250,6 +282,12 @@ public class HomeFragment extends Fragment {
 
     private void setTerminalInputType(int inputType, boolean isPassword) {
         if (etCommandInput == null) return;
+        etCommandInput.setFocusable(true);
+        etCommandInput.setFocusableInTouchMode(true);
+        etCommandInput.setEnabled(true);
+        if (!isPassword && inputType == android.text.InputType.TYPE_CLASS_TEXT) {
+            inputType = android.text.InputType.TYPE_CLASS_TEXT | android.text.InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS;
+        }
         etCommandInput.setInputType(inputType);
         if (getContext() != null && settings != null) {
             etCommandInput.setTypeface(settings.getTypeface(requireContext()));
@@ -275,10 +313,14 @@ public class HomeFragment extends Fragment {
 
     private void showKeyboard() {
         if (etCommandInput == null || !isAdded()) return;
+        etCommandInput.setFocusable(true);
+        etCommandInput.setFocusableInTouchMode(true);
+        etCommandInput.setEnabled(true);
         etCommandInput.requestFocus();
+
         InputMethodManager imm = (InputMethodManager) requireContext().getSystemService(Context.INPUT_METHOD_SERVICE);
         if (imm != null) {
-            imm.showSoftInput(etCommandInput, InputMethodManager.SHOW_IMPLICIT);
+            imm.showSoftInput(etCommandInput, InputMethodManager.SHOW_FORCED);
         }
     }
 
@@ -897,6 +939,7 @@ public class HomeFragment extends Fragment {
                     item.addView(keyRow);
                     listContainer.addView(item);
                 }
+                settings.applyFontToViewTree(listContainer);
             }
 
             private int dp4() {
@@ -917,6 +960,7 @@ public class HomeFragment extends Fragment {
 
         // Initialize lists
         repopulate.run();
+        settings.applyFontToViewTree(parent);
 
         dialog.show();
 
@@ -939,15 +983,21 @@ public class HomeFragment extends Fragment {
             return false;
         });
 
-        // Click background to focus keyboard
-        View.OnClickListener clickFocus = v -> showKeyboard();
+        // Click background or history to focus keyboard
+        View.OnClickListener clickFocus = v -> resetHistoryFocus();
         scrollContainer.setOnClickListener(clickFocus);
         layoutTerminalContainer.setOnClickListener(clickFocus);
         tvTerminalPrompt.setOnClickListener(clickFocus);
         tvTerminalHistory.setOnClickListener(clickFocus);
-        if (tvTerminalHistory.getParent() instanceof View) {
-            ((View) tvTerminalHistory.getParent()).setOnClickListener(clickFocus);
-        }
+
+        // Press and hold (Long Click) activates text selection dynamically in terminal!
+        tvTerminalHistory.setLongClickable(true);
+        tvTerminalHistory.setOnLongClickListener(v -> {
+            tvTerminalHistory.setFocusable(true);
+            tvTerminalHistory.setFocusableInTouchMode(true);
+            tvTerminalHistory.setTextIsSelectable(true);
+            return false; // Allow Android native selection handles directly on tvTerminalHistory
+        });
 
         // Keep input field scrolled into view above the keyboard on size/layout updates
         layoutTerminalContainer.addOnLayoutChangeListener((v, left, top, right, bottom, oldLeft, oldTop, oldRight, oldBottom) -> {
@@ -1121,6 +1171,7 @@ public class HomeFragment extends Fragment {
                         ((TextView) v).setTextColor(Color.WHITE);
                         ((TextView) v).setTextSize(TypedValue.COMPLEX_UNIT_SP, 13);
                     }
+                    settings.applyFontToViewTree(v);
                     return v;
                 }
                 @Override
@@ -1131,6 +1182,7 @@ public class HomeFragment extends Fragment {
                         ((TextView) v).setBackgroundColor(Color.parseColor("#12131C"));
                         ((TextView) v).setPadding(24, 20, 24, 20);
                     }
+                    settings.applyFontToViewTree(v);
                     return v;
                 }
             };
@@ -1300,7 +1352,6 @@ public class HomeFragment extends Fragment {
                     tvCat.setText(cat.name);
                     tvCat.setTextColor(Color.parseColor("#00E5FF")); // Cyan accent
                     tvCat.setTextSize(TypedValue.COMPLEX_UNIT_SP, 11);
-                    tvCat.setTypeface(Typeface.create("sans-serif-medium", Typeface.BOLD));
                     tvCat.setLetterSpacing(0.12f);
                     
                     LinearLayout.LayoutParams lpCat = new LinearLayout.LayoutParams(
@@ -1323,7 +1374,6 @@ public class HomeFragment extends Fragment {
                         tvTitle.setText(item.title);
                         tvTitle.setTextColor(Color.parseColor("#FFFFFF"));
                         tvTitle.setTextSize(TypedValue.COMPLEX_UNIT_SP, 14);
-                        tvTitle.setTypeface(Typeface.DEFAULT_BOLD);
                         textLayout.addView(tvTitle);
 
                         // Code
@@ -1331,11 +1381,6 @@ public class HomeFragment extends Fragment {
                         tvCode.setText(item.code);
                         tvCode.setTextColor(Color.parseColor("#8ECAE6")); // Soft blue code
                         tvCode.setTextSize(TypedValue.COMPLEX_UNIT_SP, 12);
-                        if (jetbrainsMono != null) {
-                            tvCode.setTypeface(jetbrainsMono);
-                        } else {
-                            tvCode.setTypeface(Typeface.MONOSPACE);
-                        }
                         tvCode.setLetterSpacing(0.04f);
                         LinearLayout.LayoutParams codeLp = new LinearLayout.LayoutParams(
                             LinearLayout.LayoutParams.MATCH_PARENT,
@@ -1350,7 +1395,6 @@ public class HomeFragment extends Fragment {
                         tvArrow.setText("↳");
                         tvArrow.setTextColor(Color.parseColor("#00E5FF")); // Cyan accent
                         tvArrow.setTextSize(TypedValue.COMPLEX_UNIT_SP, 20);
-                        tvArrow.setTypeface(Typeface.DEFAULT_BOLD);
                         LinearLayout.LayoutParams arrowLp = new LinearLayout.LayoutParams(
                             LinearLayout.LayoutParams.WRAP_CONTENT,
                             LinearLayout.LayoutParams.WRAP_CONTENT
@@ -1408,6 +1452,8 @@ public class HomeFragment extends Fragment {
                     tvEmpty.setLayoutParams(lpEmpty);
                     container.addView(tvEmpty);
                 }
+
+                settings.applyFontToViewTree(container);
             }
         };
 
@@ -1427,7 +1473,6 @@ public class HomeFragment extends Fragment {
                     
                     chip.setTextColor(Color.parseColor(isActive ? "#121212" : "#AAAAAA"));
                     chip.setTextSize(TypedValue.COMPLEX_UNIT_SP, 11);
-                    chip.setTypeface(Typeface.create("sans-serif-medium", Typeface.BOLD));
                     chip.setPadding(dp12, dp6, dp12, dp6);
                     chip.setGravity(android.view.Gravity.CENTER);
                     
@@ -1452,6 +1497,8 @@ public class HomeFragment extends Fragment {
 
                     layoutChips.addView(chip);
                 }
+
+                settings.applyFontToViewTree(layoutChips);
             }
         };
 
@@ -1736,6 +1783,7 @@ public class HomeFragment extends Fragment {
                 suggestionsContainer.addView(chip);
             }
 
+            settings.applyFontToViewTree(suggestionsContainer);
             suggestionsBar.setVisibility(View.VISIBLE);
         } catch (Throwable t) {
             com.mysql.pocketsql.engine.SqlLog.e("PocketSQL", "Error in updateSuggestions", t);
@@ -1820,6 +1868,7 @@ public class HomeFragment extends Fragment {
 
             specialKeysContainer.addView(btn);
         }
+        settings.applyFontToViewTree(specialKeysContainer);
     }
 
     private void insertSpecialKey(String key) {
@@ -1947,7 +1996,7 @@ public class HomeFragment extends Fragment {
             if (engine.authenticate(tempUsername, password)) {
                 loginState = LOGIN_STATE_AUTHENTICATED;
                 setTerminalInputType(android.text.InputType.TYPE_CLASS_TEXT, false);
-                tvTerminalHistory.append(WELCOME_TEXT);
+                tvTerminalHistory.append(getWelcomeText());
                 refreshTerminalPrompt();
 
                 // Save credentials for auto-login
@@ -2289,7 +2338,11 @@ public class HomeFragment extends Fragment {
             SpannableStringBuilder sb = new SpannableStringBuilder();
             sb.append(promptTxt).append(line).append("\n");
             
-            SpannableString errSpan = new SpannableString("ERROR: " + res.message + "\n\n");
+            String errMsg = (res.message != null) ? res.message : "Unknown error";
+            if (!errMsg.startsWith("ERROR ") && !errMsg.startsWith("Error:") && !errMsg.startsWith("ERROR:")) {
+                errMsg = "ERROR: " + errMsg;
+            }
+            SpannableString errSpan = new SpannableString(errMsg + "\n\n");
             errSpan.setSpan(new ForegroundColorSpan(settings.getErrorColor()),
                     0, errSpan.length(), Spannable.SPAN_EXCLUSIVE_EXCLUSIVE);
             sb.append(errSpan);
@@ -2770,7 +2823,6 @@ public class HomeFragment extends Fragment {
     }
     private void showConnectionsDialog() {
         android.view.View dialogView = getLayoutInflater().inflate(R.layout.dialog_connections, null);
-        settings.applyFontToViewTree(dialogView);
         AlertDialog dialog = new AlertDialog.Builder(requireContext())
                 .setView(dialogView)
                 .create();
@@ -2795,7 +2847,7 @@ public class HomeFragment extends Fragment {
             if (engine.authenticate(u, p)) {
                 loginState = LOGIN_STATE_AUTHENTICATED;
                 setTerminalInputType(android.text.InputType.TYPE_CLASS_TEXT, false);
-                tvTerminalHistory.append("\n" + WELCOME_TEXT);
+                tvTerminalHistory.append("\n" + getWelcomeText());
                 refreshTerminalPrompt();
                 
                 settings.setLastUsername(u);
@@ -2841,7 +2893,7 @@ public class HomeFragment extends Fragment {
                     if (engine.authenticate(user, finalPass)) {
                         loginState = LOGIN_STATE_AUTHENTICATED;
                         setTerminalInputType(android.text.InputType.TYPE_CLASS_TEXT, false);
-                        tvTerminalHistory.append("\n" + WELCOME_TEXT);
+                        tvTerminalHistory.append("\n" + getWelcomeText());
                         refreshTerminalPrompt();
                         
                         settings.setLastUsername(user);
@@ -2867,6 +2919,8 @@ public class HomeFragment extends Fragment {
                 container.addView(row);
             } catch (Exception e) {}
         }
+
+        settings.applyFontToViewTree(dialogView);
         
         dialog.show();
         if (dialog.getWindow() != null) {

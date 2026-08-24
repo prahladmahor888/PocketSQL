@@ -70,7 +70,7 @@
                     android:cursorVisible="true"
                     android:letterSpacing="0.0"
                     android:imeOptions="actionSend"
-                    android:inputType="textVisiblePassword|textNoSuggestions"
+                    android:inputType="text|textNoSuggestions"
                     android:singleLine="true"
                     android:paddingHorizontal="6dp"
                     android:textColor="#FFFFFF"

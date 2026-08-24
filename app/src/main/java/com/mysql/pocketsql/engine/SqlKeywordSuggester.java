@@ -49,7 +49,7 @@ public class SqlKeywordSuggester {
         "ON UPDATE", "ON UPDATE CURRENT_TIMESTAMP", "ON UPDATE CASCADE", "CURRENT_TIMESTAMP",
         
         // User & Privilege Management
-        "USER", "IDENTIFIED", "BY", "GRANT", "PRIVILEGES", "REVOKE", "FLUSH", "TO",
+        "USER", "IDENTIFIED", "GRANT", "PRIVILEGES", "REVOKE", "FLUSH", "TO",
         
         // Transaction Control
         "START", "TRANSACTION", "BEGIN", "COMMIT", "ROLLBACK", "SAVEPOINT",
