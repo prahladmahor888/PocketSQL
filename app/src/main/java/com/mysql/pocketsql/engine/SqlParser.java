@@ -2,6 +2,7 @@ package com.mysql.pocketsql.engine;
 
 import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
@@ -71,7 +72,7 @@ public class SqlParser {
     }
 
     private static final java.util.Set<String> NON_IDENTIFIER_KEYWORDS = new java.util.HashSet<>(java.util.Arrays.asList(
-        "SELECT", "INSERT", "UPDATE", "DELETE", "CREATE", "DROP",
+        "WITH", "SELECT", "INSERT", "UPDATE", "DELETE", "CREATE", "DROP",
         "ALTER", "USE", "SHOW", "FROM", "WHERE", "JOIN",
         "ON", "AND", "OR", "NULL", "TRUE", "FALSE",
         "AS", "LIMIT", "ORDER", "GROUP", "HAVING", "UNION",
@@ -87,6 +88,10 @@ public class SqlParser {
             return !NON_IDENTIFIER_KEYWORDS.contains(token.value.toUpperCase());
         }
         return false;
+    }
+
+    private static boolean lastCharIs(StringBuilder sb, char c) {
+        return sb.length() > 0 && sb.charAt(sb.length() - 1) == c;
     }
 
     void expect(SqlToken.Type type, String errorMsg) throws SqlSyntaxException {
@@ -136,6 +141,9 @@ public class SqlParser {
         Command cmd;
         if (t.type == SqlToken.Type.KEYWORD) {
             switch (t.value.toUpperCase()) {
+                case "WITH":
+                    cmd = parseWith();
+                    break;
                 case "CREATE":
                     cmd = parseCreate();
                     break;
@@ -478,6 +486,14 @@ public class SqlParser {
             }
             
             String tableName = parseTableName("Expected table name after 'CREATE TABLE'");
+
+            if (matchKeyword("AS")) {
+                Command selectCmd = parseSelect();
+                if (selectCmd instanceof Command.Select) {
+                    return new Command.CreateTable(tableName, (Command.Select) selectCmd, ifNotExists);
+                }
+                throw new SqlSyntaxException("Expected SELECT query after CREATE TABLE AS", peek().position);
+            }
 
             expectSymbol("(", "Expected '(' after table name");
 
@@ -837,8 +853,11 @@ public class SqlParser {
                 expectKeyword("EXISTS", "Expected 'EXISTS' after 'DROP TABLE IF'");
                 ifExists = true;
             }
-            String tableName = parseTableName("Expected table name");
-            return new Command.DropTable(tableName, ifExists);
+            List<String> tableNames = new ArrayList<>();
+            do {
+                tableNames.add(parseTableName("Expected table name"));
+            } while (matchSymbol(","));
+            return new Command.DropTable(tableNames, ifExists);
         } else if (matchKeyword("FUNCTION")) {
             boolean ifExists = false;
             if (matchKeyword("IF")) {
@@ -854,8 +873,11 @@ public class SqlParser {
                 expectKeyword("EXISTS", "Expected 'EXISTS' after 'DROP VIEW IF'");
                 ifExists = true;
             }
-            String viewName = parseTableName("Expected view name");
-            return new Command.DropView(viewName, ifExists);
+            List<String> viewNames = new ArrayList<>();
+            do {
+                viewNames.add(parseTableName("Expected view name"));
+            } while (matchSymbol(","));
+            return new Command.DropView(viewNames, ifExists);
         } else if (matchKeyword("PROCEDURE") || matchName("PROCEDURE")) {
             boolean ifExists = false;
             if (matchKeyword("IF")) {
@@ -1097,7 +1119,15 @@ public class SqlParser {
             expectSymbol(")", "Expected ')' to close insert columns list");
         }
 
-        expectKeyword("VALUES", "Expected 'VALUES' in insert command");
+        if (peek().type == SqlToken.Type.KEYWORD && "SELECT".equalsIgnoreCase(peek().value)) {
+            Command selectCmd = parseSelect();
+            if (selectCmd instanceof Command.Select) {
+                return new Command.Insert(tableName, columnNames, (Command.Select) selectCmd);
+            }
+            throw new SqlSyntaxException("Expected SELECT query after INSERT INTO " + tableName, peek().position);
+        }
+
+        expectKeyword("VALUES", "Expected 'VALUES' or 'SELECT' in insert command");
 
         List<List<Object>> valuesList = new ArrayList<>();
         do {
@@ -1211,7 +1241,31 @@ public class SqlParser {
         return "\u0000EXPR\u0000" + expr;
     }
 
-    private Command parseSelect() throws SqlSyntaxException {
+    private Command parseWith() throws SqlSyntaxException {
+        consume(); // WITH
+        Map<String, Command.Select> ctes = new LinkedHashMap<>();
+        do {
+            SqlToken nameTok = peek();
+            if (nameTok.type != SqlToken.Type.IDENTIFIER && nameTok.type != SqlToken.Type.KEYWORD) {
+                throw new SqlSyntaxException("Expected CTE table name", nameTok.position);
+            }
+            consume();
+            String cteName = nameTok.value;
+            expectKeyword("AS", "Expected 'AS' after CTE name");
+            expectSymbol("(", "Expected '(' before CTE query");
+            Command selectCmd = parseSelect();
+            if (!(selectCmd instanceof Command.Select)) {
+                throw new SqlSyntaxException("Expected SELECT query in CTE definition", peek().position);
+            }
+            ctes.put(cteName, (Command.Select) selectCmd);
+            expectSymbol(")", "Expected ')' after CTE query");
+        } while (matchSymbol(","));
+
+        Command mainCmd = parse();
+        return new Command.With(ctes, mainCmd);
+    }
+
+    private Command.Select parseSelect() throws SqlSyntaxException {
         consume(); // SELECT
         
         boolean distinct = false;
@@ -1222,8 +1276,9 @@ public class SqlParser {
         List<String> projection = new ArrayList<>();
         Map<String, String> aliases = new HashMap<>();
 
-        if (matchSymbol("*")) {
-            projection = null; // null represents *
+        if ("*".equals(peek().value) && pos + 1 < tokens.size() && tokens.get(pos + 1).type == SqlToken.Type.KEYWORD && "FROM".equalsIgnoreCase(tokens.get(pos + 1).value)) {
+            consume(); // consume *
+            projection = null; // single standalone SELECT * FROM
         } else {
             do {
                 String selectItem;
@@ -1231,6 +1286,9 @@ public class SqlParser {
                 if (t.type == SqlToken.Type.SYMBOL && "*".equals(t.value)) {
                     consume();
                     selectItem = "*";
+                } else if ((t.type == SqlToken.Type.IDENTIFIER || t.type == SqlToken.Type.KEYWORD) && pos + 2 < tokens.size() && ".".equals(tokens.get(pos + 1).value) && "*".equals(tokens.get(pos + 2).value)) {
+                    selectItem = t.value + ".*";
+                    pos += 3;
                 } else {
                     selectItem = parseSelectExpression();
                 }
@@ -1261,18 +1319,54 @@ public class SqlParser {
                         aliases.put(selectItem, aliasToken.value);
                     }
                 }
-                projection.add(selectItem);
+projection.add(selectItem);
             } while (matchSymbol(","));
         }
 
         String tableName = null;
+        Command.Select derivedTableQuery = null;
+        String derivedTableAlias = null;
         List<Clause.Join> joins = new ArrayList<>();
         Map<String, String> tableAliases = new HashMap<>();
         if (matchKeyword("FROM")) {
-            tableName = parseTableName("Expected table name");
-            String tableAlias = parseTableAlias();
-            if (tableAlias != null) {
-                tableAliases.put(tableAlias, tableName);
+            if (matchSymbol("(")) {
+                derivedTableQuery = parseSelect();
+                expectSymbol(")", "Expected ')' to close derived table subquery");
+                if (matchKeyword("AS")) {
+                    SqlToken aliasTok = peek();
+                    if (aliasTok.type != SqlToken.Type.IDENTIFIER && aliasTok.type != SqlToken.Type.KEYWORD) {
+                        throw new SqlSyntaxException("Expected alias name after AS", aliasTok.position);
+                    }
+                    consume();
+                    derivedTableAlias = aliasTok.value;
+                } else if (peek().type == SqlToken.Type.IDENTIFIER || peek().type == SqlToken.Type.KEYWORD) {
+                    SqlToken aliasTok = peek();
+                    if (!"WHERE".equalsIgnoreCase(aliasTok.value) && 
+                        !"GROUP".equalsIgnoreCase(aliasTok.value) && 
+                        !"HAVING".equalsIgnoreCase(aliasTok.value) && 
+                        !"ORDER".equalsIgnoreCase(aliasTok.value) && 
+                        !"LIMIT".equalsIgnoreCase(aliasTok.value) && 
+                        !"JOIN".equalsIgnoreCase(aliasTok.value) && 
+                        !"LEFT".equalsIgnoreCase(aliasTok.value) && 
+                        !"RIGHT".equalsIgnoreCase(aliasTok.value) && 
+                        !"INNER".equalsIgnoreCase(aliasTok.value) && 
+                        !"CROSS".equalsIgnoreCase(aliasTok.value) && 
+                        !"UNION".equalsIgnoreCase(aliasTok.value)) {
+                        consume();
+                        derivedTableAlias = aliasTok.value;
+                    }
+                }
+                if (derivedTableAlias == null) {
+                    derivedTableAlias = "derived_table_" + System.currentTimeMillis();
+                }
+                tableName = derivedTableAlias;
+                tableAliases.put(derivedTableAlias, derivedTableAlias);
+            } else {
+                tableName = parseTableName("Expected table name");
+                String tableAlias = parseTableAlias();
+                if (tableAlias != null) {
+                    tableAliases.put(tableAlias, tableName);
+                }
             }
 
             // Parse Joins
@@ -1292,14 +1386,43 @@ public class SqlParser {
                     joinType = "CROSS";
                 } else if (matchKeyword("JOIN")) {
                     joinType = "INNER";
+                } else if (matchSymbol(",")) {
+                    joinType = "CROSS";
                 } else {
                     break;
                 }
 
-                String joinTable = parseTableName("Expected table name to join");
-                String joinAlias = parseTableAlias();
-                if (joinAlias != null) {
-                    tableAliases.put(joinAlias, joinTable);
+                String joinTable = null;
+                Command.Select joinDerivedTableQuery = null;
+                String joinAlias = null;
+                if (matchSymbol("(")) {
+                    joinDerivedTableQuery = parseSelect();
+                    expectSymbol(")", "Expected ')' to close derived table subquery in JOIN");
+                    if (matchKeyword("AS")) {
+                        SqlToken aliasTok = peek();
+                        if (aliasTok.type != SqlToken.Type.IDENTIFIER && aliasTok.type != SqlToken.Type.KEYWORD) {
+                            throw new SqlSyntaxException("Expected alias name after AS in JOIN", aliasTok.position);
+                        }
+                        consume();
+                        joinAlias = aliasTok.value;
+                    } else if (peek().type == SqlToken.Type.IDENTIFIER || peek().type == SqlToken.Type.KEYWORD) {
+                        SqlToken aliasTok = peek();
+                        if (!"ON".equalsIgnoreCase(aliasTok.value)) {
+                            consume();
+                            joinAlias = aliasTok.value;
+                        }
+                    }
+                    if (joinAlias == null) {
+                        joinAlias = "derived_join_" + System.currentTimeMillis();
+                    }
+                    joinTable = joinAlias;
+                    tableAliases.put(joinAlias, joinAlias);
+                } else {
+                    joinTable = parseTableName("Expected table name to join");
+                    joinAlias = parseTableAlias();
+                    if (joinAlias != null) {
+                        tableAliases.put(joinAlias, joinTable);
+                    }
                 }
 
                 String leftCol = null;
@@ -1359,75 +1482,148 @@ public class SqlParser {
                             extraVal = null;
                         } else if (extraValToken.type == SqlToken.Type.IDENTIFIER || extraValToken.type == SqlToken.Type.KEYWORD) {
                             consume();
-                            String valCol = extraValToken.value;
+                            String extraValStr = extraValToken.value;
                             if (matchSymbol(".")) {
                                 expect(SqlToken.Type.IDENTIFIER, "Expected column name after '.'");
-                                valCol = valCol + "." + tokens.get(pos - 1).value;
+                                extraValStr = extraValStr + "." + tokens.get(pos - 1).value;
                             }
-                            extraVal = valCol;
+                            extraVal = extraValStr;
                             isValCol = true;
                         } else {
-                            throw new SqlSyntaxException("Expected filter value in join ON extra condition", extraValToken.position);
+                            throw new SqlSyntaxException("Expected value or column name in join ON extra condition", extraValToken.position);
                         }
                         extraConditions.add(new Clause.Where(extraCol, extraOp, extraVal, isValCol));
                     }
                 }
-                joins.add(new Clause.Join(joinTable, joinType, leftCol, rightCol, joinAlias, extraConditions));
+                joins.add(new Clause.Join(joinTable, joinType, leftCol, rightCol, joinAlias, extraConditions, joinDerivedTableQuery));
             }
         }
 
-        Clause.Where where = parseOptionalWhere();
+        // Parse WHERE
+        Clause.Where where = null;
+        if (matchKeyword("WHERE")) {
+            where = parseWhereExpression();
+        }
 
+        // Parse GROUP BY
         Clause.GroupBy groupBy = null;
         if (matchKeyword("GROUP")) {
             expectKeyword("BY", "Expected 'BY' after 'GROUP'");
-            expect(SqlToken.Type.IDENTIFIER, "Expected column name for GROUP BY");
-            groupBy = new Clause.GroupBy(tokens.get(pos - 1).value);
+            List<String> groupCols = new ArrayList<>();
+            do {
+                groupCols.add(parseGroupByExpression());
+            } while (matchSymbol(","));
+            groupBy = new Clause.GroupBy(groupCols);
         }
 
+        // Parse HAVING
         Clause.Having having = null;
         if (matchKeyword("HAVING")) {
-            SqlToken funcToken = peek();
-            if (funcToken.type != SqlToken.Type.IDENTIFIER && funcToken.type != SqlToken.Type.KEYWORD) {
-                throw new SqlSyntaxException("Expected aggregate function in HAVING", funcToken.position);
-            }
-            consume();
-            StringBuilder func = new StringBuilder(funcToken.value);
-            expectSymbol("(", "Expected '(' after function name");
-            SqlToken inner = peek();
-            if (inner.type == SqlToken.Type.SYMBOL && "*".equals(inner.value)) {
+            // Left side expression (e.g. MAX(order_date), COUNT(DISTINCT FORMAT(order_date, 'yyyy-MM')))
+            StringBuilder leftSb = new StringBuilder();
+            int leftParenDepth = 0;
+            while (peek().type != SqlToken.Type.EOF) {
+                SqlToken t = peek();
+                // Only break on comparison operators when NOT inside parentheses
+                if (leftParenDepth == 0 && t.type == SqlToken.Type.SYMBOL && (
+                    t.value.equals("=") || t.value.equals("!=") || t.value.equals("<>") ||
+                    t.value.equals(">") || t.value.equals("<") || t.value.equals(">=") || t.value.equals("<=")
+                )) {
+                    break;
+                }
                 consume();
-                func.append("(*)");
-            } else {
-                expect(SqlToken.Type.IDENTIFIER, "Expected column name inside HAVING function");
-                func.append("(").append(tokens.get(pos - 1).value).append(")");
+                if (t.type == SqlToken.Type.SYMBOL) {
+                    if ("(".equals(t.value)) leftParenDepth++;
+                    else if (")".equals(t.value)) leftParenDepth--;
+                }
+                if (t.type == SqlToken.Type.STRING) {
+                    if (leftSb.length() > 0 && !lastCharIs(leftSb, '(') && !lastCharIs(leftSb, ',')) leftSb.append(" ");
+                    leftSb.append("'").append(t.value.replace("'", "\\'")).append("'");
+                } else if (t.value.equals("(") || t.value.equals(".")) {
+                    leftSb.append(t.value);
+                } else if (t.value.equals(")") || t.value.equals(",")) {
+                    leftSb.append(t.value);
+                } else {
+                    if (leftSb.length() > 0 && !lastCharIs(leftSb, '(') && !lastCharIs(leftSb, ',') && !lastCharIs(leftSb, '.')) {
+                        leftSb.append(" ");
+                    }
+                    leftSb.append(t.value);
+                }
             }
-            expectSymbol(")", "Expected ')' inside HAVING function");
+            String leftExpr = leftSb.toString().trim();
+            if (leftExpr.isEmpty()) {
+                throw new SqlSyntaxException("Expected aggregate function in HAVING", peek().position);
+            }
 
             SqlToken opToken = peek();
-            if (opToken.type != SqlToken.Type.SYMBOL) {
+            if (opToken.type != SqlToken.Type.SYMBOL || !(
+                opToken.value.equals("=") || opToken.value.equals("!=") || opToken.value.equals("<>") ||
+                opToken.value.equals(">") || opToken.value.equals("<") || opToken.value.equals(">=") || opToken.value.equals("<=")
+            )) {
                 throw new SqlSyntaxException("Expected comparison operator in HAVING clause", opToken.position);
             }
             consume();
             String op = opToken.value;
 
-            SqlToken valToken = peek();
-            Object value;
-            if (valToken.type == SqlToken.Type.STRING) {
-                consume();
-                value = valToken.value;
-            } else if (valToken.type == SqlToken.Type.NUMBER) {
-                consume();
-                if (valToken.value.contains(".")) {
-                    value = Double.parseDouble(valToken.value);
-                } else {
-                    value = Long.parseLong(valToken.value);
+            // Right side expression (e.g. CURDATE() - INTERVAL 6 MONTH)
+            StringBuilder rightSb = new StringBuilder();
+            int parenDepth = 0;
+            while (peek().type != SqlToken.Type.EOF) {
+                SqlToken t = peek();
+                if (parenDepth == 0) {
+                    if (t.type == SqlToken.Type.SYMBOL && (t.value.equals(";") || t.value.equals(")"))) {
+                        break;
+                    }
+                    if (t.type == SqlToken.Type.KEYWORD && (
+                        "ORDER".equalsIgnoreCase(t.value) ||
+                        "LIMIT".equalsIgnoreCase(t.value) ||
+                        "UNION".equalsIgnoreCase(t.value)
+                    )) {
+                        break;
+                    }
                 }
-            } else {
-                throw new SqlSyntaxException("Expected numeric or string value in HAVING comparison", valToken.position);
+                consume();
+                if (t.type == SqlToken.Type.SYMBOL) {
+                    if ("(".equals(t.value)) parenDepth++;
+                    else if (")".equals(t.value)) parenDepth--;
+                }
+                if (t.type == SqlToken.Type.STRING) {
+                    if (rightSb.length() > 0 && !lastCharIs(rightSb, '(') && !lastCharIs(rightSb, ',') && !lastCharIs(rightSb, '.')) {
+                        rightSb.append(" ");
+                    }
+                    rightSb.append("'").append(t.value.replace("'", "\\'")).append("'");
+                } else if (t.value.equals("(") || t.value.equals(".")) {
+                    rightSb.append(t.value);
+                } else if (t.value.equals(")") || t.value.equals(",")) {
+                    rightSb.append(t.value);
+                } else {
+                    if (rightSb.length() > 0 && !lastCharIs(rightSb, '(') && !lastCharIs(rightSb, ',') && !lastCharIs(rightSb, '.')) {
+                        rightSb.append(" ");
+                    }
+                    rightSb.append(t.value);
+                }
+            }
+            String rightExpr = rightSb.toString().trim();
+            if (rightExpr.isEmpty()) {
+                throw new SqlSyntaxException("Expected value or expression in HAVING comparison", peek().position);
             }
 
-            having = new Clause.Having(func.toString(), op, value);
+            Object valObj;
+            try {
+                if (rightExpr.contains(".")) {
+                    valObj = Double.parseDouble(rightExpr);
+                } else {
+                    valObj = Long.parseLong(rightExpr);
+                }
+            } catch (NumberFormatException e) {
+                if ((rightExpr.startsWith("'") && rightExpr.endsWith("'")) || (rightExpr.startsWith("\"") && rightExpr.endsWith("\""))) {
+                    valObj = rightExpr.substring(1, rightExpr.length() - 1);
+                } else {
+                    valObj = rightExpr;
+                }
+            }
+
+            having = new Clause.Having(leftExpr, op, valObj);
         }
 
         List<Clause.OrderBy> orderBySpecs = new ArrayList<>();
@@ -1467,7 +1663,53 @@ public class SqlParser {
         }
 
         return new Command.Select(projection, tableName, where, orderBySpecs, limit,
-                                  distinct, aliases, joins, groupBy, having, union, tableAliases);
+                                  distinct, aliases, joins, groupBy, having, union, tableAliases, derivedTableQuery, derivedTableAlias);
+    }
+
+    private String parseGroupByExpression() throws SqlSyntaxException {
+        StringBuilder sb = new StringBuilder();
+        int parenDepth = 0;
+        while (peek().type != SqlToken.Type.EOF) {
+            SqlToken t = peek();
+            if (parenDepth == 0) {
+                if (t.type == SqlToken.Type.SYMBOL && (t.value.equals(",") || t.value.equals(";") || t.value.equals(")"))) {
+                    break;
+                }
+                if (t.type == SqlToken.Type.KEYWORD && (
+                    "HAVING".equalsIgnoreCase(t.value) ||
+                    "ORDER".equalsIgnoreCase(t.value) ||
+                    "LIMIT".equalsIgnoreCase(t.value) ||
+                    "UNION".equalsIgnoreCase(t.value)
+                )) {
+                    break;
+                }
+            }
+            consume();
+            if (t.type == SqlToken.Type.SYMBOL) {
+                if ("(".equals(t.value)) parenDepth++;
+                else if (")".equals(t.value)) parenDepth--;
+            }
+            if (t.type == SqlToken.Type.STRING) {
+                if (sb.length() > 0 && !lastCharIs(sb, '(') && !lastCharIs(sb, ',') && !lastCharIs(sb, '.')) {
+                    sb.append(" ");
+                }
+                sb.append("'").append(t.value.replace("'", "\\'")).append("'");
+            } else if (t.value.equals("(") || t.value.equals(".")) {
+                sb.append(t.value);
+            } else if (t.value.equals(")") || t.value.equals(",")) {
+                sb.append(t.value);
+            } else {
+                if (sb.length() > 0 && !lastCharIs(sb, '(') && !lastCharIs(sb, ',') && !lastCharIs(sb, '.')) {
+                    sb.append(" ");
+                }
+                sb.append(t.value);
+            }
+        }
+        String exprStr = sb.toString().trim();
+        if (exprStr.isEmpty()) {
+            throw new SqlSyntaxException("Expected expression or column name in GROUP BY", peek().position);
+        }
+        return exprStr;
     }
 
     private String parseTableAlias() throws SqlSyntaxException {
@@ -1763,11 +2005,33 @@ public class SqlParser {
     }
 
     private Clause.Where parseSimpleComparison() throws SqlSyntaxException {
-        expect(SqlToken.Type.IDENTIFIER, "Expected column name in WHERE filter");
-        String column = tokens.get(pos - 1).value;
+        SqlToken firstTok = peek();
+        if (firstTok.type != SqlToken.Type.IDENTIFIER && firstTok.type != SqlToken.Type.KEYWORD) {
+            throw new SqlSyntaxException("Expected column name or expression in WHERE filter", firstTok.position);
+        }
+        consume();
+        String column = firstTok.value;
         if (matchSymbol(".")) {
             expect(SqlToken.Type.IDENTIFIER, "Expected column name after '.'");
             column = column + "." + tokens.get(pos - 1).value;
+        }
+        if (matchSymbol("(")) {
+            StringBuilder params = new StringBuilder("(");
+            int depth = 1;
+            while (depth > 0 && peek().type != SqlToken.Type.EOF) {
+                SqlToken tok = consume();
+                if (tok.type == SqlToken.Type.SYMBOL && "(".equals(tok.value)) {
+                    depth++;
+                } else if (tok.type == SqlToken.Type.SYMBOL && ")".equals(tok.value)) {
+                    depth--;
+                }
+                if (tok.type == SqlToken.Type.STRING) {
+                    params.append("'").append(tok.value.replace("'", "\\'")).append("'");
+                } else {
+                    params.append(tok.value);
+                }
+            }
+            column = column + params.toString();
         }
 
         // Support IS NULL / IS NOT NULL
@@ -1781,19 +2045,40 @@ public class SqlParser {
             }
         }
 
+        boolean isNot = matchKeyword("NOT");
         SqlToken opToken = peek();
         if (opToken.type != SqlToken.Type.SYMBOL && 
             !(opToken.type == SqlToken.Type.KEYWORD && 
              ("LIKE".equalsIgnoreCase(opToken.value) || 
               "IN".equalsIgnoreCase(opToken.value) || 
               "BETWEEN".equalsIgnoreCase(opToken.value)))) {
-            throw new SqlSyntaxException("Expected operator (=, !=, <>, >, <, >=, <=, LIKE, IN, BETWEEN) in WHERE filter", opToken.position);
+            throw new SqlSyntaxException("Expected operator (=, !=, <>, >, <, >=, <=, LIKE, IN, BETWEEN, NOT IN, NOT LIKE, NOT BETWEEN) in WHERE filter", opToken.position);
         }
         consume();
-        String operator = opToken.value.toUpperCase();
+        String operator = isNot ? ("NOT " + opToken.value.toUpperCase()) : opToken.value.toUpperCase();
 
-        if ("IN".equals(operator)) {
-            expectSymbol("(", "Expected '(' after 'IN'");
+        if ("IN".equals(operator) || "NOT IN".equals(operator)) {
+            expectSymbol("(", "Expected '(' after '" + operator + "'");
+            SqlToken nextTok = peek();
+            if (nextTok.type == SqlToken.Type.KEYWORD && "SELECT".equalsIgnoreCase(nextTok.value)) {
+                StringBuilder subExpr = new StringBuilder("(");
+                int depth = 1;
+                while (depth > 0 && peek().type != SqlToken.Type.EOF) {
+                    SqlToken tok = consume();
+                    if (tok.type == SqlToken.Type.SYMBOL && "(".equals(tok.value)) {
+                        depth++;
+                    } else if (tok.type == SqlToken.Type.SYMBOL && ")".equals(tok.value)) {
+                        depth--;
+                    }
+                    if (tok.type == SqlToken.Type.STRING) {
+                        subExpr.append("'").append(tok.value.replace("'", "\\'")).append("'");
+                    } else {
+                        subExpr.append(tok.value).append(" ");
+                    }
+                }
+                String subSql = subExpr.toString().trim();
+                return new Clause.Where(column, operator, subSql, true);
+            }
             List<Object> inValues = new ArrayList<>();
             do {
                 SqlToken tk = peek();
@@ -1812,10 +2097,10 @@ public class SqlParser {
                 }
             } while (matchSymbol(","));
             expectSymbol(")", "Expected ')' to close IN list");
-            return new Clause.Where(column, "IN", inValues);
+            return new Clause.Where(column, operator, inValues);
         }
 
-        if ("BETWEEN".equals(operator)) {
+        if ("BETWEEN".equals(operator) || "NOT BETWEEN".equals(operator)) {
             SqlToken lowToken = peek();
             Object low;
             if (lowToken.type == SqlToken.Type.STRING) {
@@ -1844,62 +2129,73 @@ public class SqlParser {
                 throw new SqlSyntaxException("Expected high value in BETWEEN clause", highToken.position);
             }
 
-            return new Clause.Where(column, "BETWEEN", low, high);
+            return new Clause.Where(column, operator, low, high);
         }
 
-        SqlToken valToken = peek();
+        StringBuilder rightSb = new StringBuilder();
+        int rightParenDepth = 0;
+        while (peek().type != SqlToken.Type.EOF) {
+            SqlToken t = peek();
+            if (rightParenDepth == 0) {
+                if (t.type == SqlToken.Type.SYMBOL && (t.value.equals(";") || t.value.equals(")"))) {
+                    break;
+                }
+                if (t.type == SqlToken.Type.KEYWORD && (
+                    "AND".equalsIgnoreCase(t.value) ||
+                    "OR".equalsIgnoreCase(t.value) ||
+                    "GROUP".equalsIgnoreCase(t.value) ||
+                    "HAVING".equalsIgnoreCase(t.value) ||
+                    "ORDER".equalsIgnoreCase(t.value) ||
+                    "LIMIT".equalsIgnoreCase(t.value) ||
+                    "UNION".equalsIgnoreCase(t.value)
+                )) {
+                    break;
+                }
+            }
+            consume();
+            if (t.type == SqlToken.Type.SYMBOL) {
+                if ("(".equals(t.value)) rightParenDepth++;
+                else if (")".equals(t.value)) rightParenDepth--;
+            }
+            if (t.type == SqlToken.Type.STRING) {
+                if (rightSb.length() > 0 && !lastCharIs(rightSb, '(') && !lastCharIs(rightSb, ',') && !lastCharIs(rightSb, '.') && !lastCharIs(rightSb, '@')) {
+                    rightSb.append(" ");
+                }
+                rightSb.append("'").append(t.value.replace("'", "\\'")).append("'");
+            } else if (t.value.equals("(") || t.value.equals(".") || t.value.equals("@")) {
+                rightSb.append(t.value);
+            } else if (t.value.equals(")") || t.value.equals(",")) {
+                rightSb.append(t.value);
+            } else {
+                if (rightSb.length() > 0 && !lastCharIs(rightSb, '(') && !lastCharIs(rightSb, ',') && !lastCharIs(rightSb, '.') && !lastCharIs(rightSb, '@')) {
+                    rightSb.append(" ");
+                }
+                rightSb.append(t.value);
+            }
+        }
+
+        String rightExpr = rightSb.toString().trim();
+        if (rightExpr.isEmpty()) {
+            throw new SqlSyntaxException("Expected filter value in WHERE clause", peek().position);
+        }
+
         Object value;
         boolean isValueColumn = false;
-        if (valToken.type == SqlToken.Type.STRING) {
-            consume();
-            value = valToken.value;
-        } else if (valToken.type == SqlToken.Type.NUMBER) {
-            consume();
-            if (valToken.value.contains(".")) {
-                value = Double.parseDouble(valToken.value);
+        try {
+            if (rightExpr.contains(".")) {
+                value = Double.parseDouble(rightExpr);
             } else {
-                value = Long.parseLong(valToken.value);
+                value = Long.parseLong(rightExpr);
             }
-        } else if (valToken.type == SqlToken.Type.KEYWORD && "NULL".equalsIgnoreCase(valToken.value)) {
-            consume();
-            value = null;
-        } else if (valToken.type == SqlToken.Type.IDENTIFIER || valToken.type == SqlToken.Type.KEYWORD) {
-            consume();
-            String valCol = valToken.value;
-            if (matchSymbol(".")) {
-                expect(SqlToken.Type.IDENTIFIER, "Expected column name after '.'");
-                valCol = valCol + "." + tokens.get(pos - 1).value;
+        } catch (NumberFormatException e) {
+            if ((rightExpr.startsWith("'") && rightExpr.endsWith("'")) || (rightExpr.startsWith("\"") && rightExpr.endsWith("\""))) {
+                value = rightExpr.substring(1, rightExpr.length() - 1);
+            } else if ("NULL".equalsIgnoreCase(rightExpr)) {
+                value = null;
+            } else {
+                value = rightExpr;
+                isValueColumn = true;
             }
-            if (matchSymbol("(")) {
-                StringBuilder params = new StringBuilder("(");
-                int depth = 1;
-                while (depth > 0 && peek().type != SqlToken.Type.EOF) {
-                    SqlToken tok = consume();
-                    if (tok.type == SqlToken.Type.SYMBOL && "(".equals(tok.value)) {
-                        depth++;
-                    } else if (tok.type == SqlToken.Type.SYMBOL && ")".equals(tok.value)) {
-                        depth--;
-                    }
-                    if (tok.type == SqlToken.Type.STRING) {
-                        params.append("'").append(tok.value.replace("'", "\\'")).append("'");
-                    } else {
-                        params.append(tok.value);
-                    }
-                }
-                valCol = valCol + params.toString();
-            }
-            value = valCol;
-            isValueColumn = true;
-        } else if (matchSymbol("@")) {
-            SqlToken varToken = peek();
-            if (varToken.type != SqlToken.Type.IDENTIFIER && varToken.type != SqlToken.Type.KEYWORD) {
-                throw new SqlSyntaxException("Expected variable name after '@' in WHERE clause", varToken.position);
-            }
-            consume();
-            value = "@" + varToken.value;
-            isValueColumn = true;
-        } else {
-            throw new SqlSyntaxException("Expected filter value in WHERE clause", valToken.position);
         }
 
         return new Clause.Where(column, operator, value, isValueColumn);
@@ -2359,218 +2655,250 @@ public class SqlParser {
         expect(SqlToken.Type.IDENTIFIER, "Expected table name in ALTER TABLE");
         String tableName = tokens.get(pos - 1).value;
 
-        SqlToken opToken = peek();
-        if (opToken.type != SqlToken.Type.KEYWORD) {
-            throw new SqlSyntaxException("Expected ALTER TABLE operation", opToken.position);
-        }
-        String op = opToken.value.toUpperCase();
-        consume();
+        List<Command> operations = new ArrayList<>();
 
-        if ("ADD".equals(op)) {
-            SqlToken next = peek();
-            if (next.type == SqlToken.Type.KEYWORD) {
-                String nextVal = next.value.toUpperCase();
-                if ("CONSTRAINT".equals(nextVal)) {
-                    consume(); // CONSTRAINT
-                    String constraintName = null;
-                    if (peek().type == SqlToken.Type.IDENTIFIER || 
-                        (peek().type == SqlToken.Type.KEYWORD && 
-                         !"UNIQUE".equalsIgnoreCase(peek().value) && 
-                         !"PRIMARY".equalsIgnoreCase(peek().value) && 
-                         !"FOREIGN".equalsIgnoreCase(peek().value) && 
-                         !"CHECK".equalsIgnoreCase(peek().value))) {
-                        constraintName = peek().value;
-                        consume();
-                    }
-                    SqlToken afterConstraint = peek();
-                    if (afterConstraint.type == SqlToken.Type.KEYWORD) {
-                        String subOp = afterConstraint.value.toUpperCase();
-                        consume();
-                        if ("UNIQUE".equals(subOp)) {
+        do {
+            SqlToken opToken = peek();
+            if (opToken.type != SqlToken.Type.KEYWORD) {
+                throw new SqlSyntaxException("Expected ALTER TABLE operation", opToken.position);
+            }
+            String op = opToken.value.toUpperCase();
+            consume();
+
+            if ("AUTO_INCREMENT".equals(op)) {
+                matchSymbol("=");
+                expect(SqlToken.Type.NUMBER, "Expected numeric value for AUTO_INCREMENT");
+                long val = Long.parseLong(tokens.get(pos - 1).value);
+                operations.add(Command.AlterTable.createAutoIncrement(tableName, val));
+            } else if ("ADD".equals(op)) {
+                if (matchSymbol("(")) {
+                    do {
+                        expect(SqlToken.Type.IDENTIFIER, "Expected column name to add");
+                        String colName = tokens.get(pos - 1).value;
+                        Command.ColumnDef cd = parseColumnDef(colName);
+                        Command.PositionSpec ps = parsePositionSpec();
+                        operations.add(new Command.AlterTable(tableName, "ADD_COLUMN", cd, ps));
+                    } while (matchSymbol(","));
+                    expectSymbol(")", "Expected ')' after ADD columns list");
+                } else {
+                    SqlToken next = peek();
+                    if (next.type == SqlToken.Type.KEYWORD) {
+                        String nextVal = next.value.toUpperCase();
+                        if ("CONSTRAINT".equals(nextVal)) {
+                            consume(); // CONSTRAINT
+                            String constraintName = null;
+                            if (peek().type == SqlToken.Type.IDENTIFIER || 
+                                (peek().type == SqlToken.Type.KEYWORD && 
+                                 !"UNIQUE".equalsIgnoreCase(peek().value) && 
+                                 !"PRIMARY".equalsIgnoreCase(peek().value) && 
+                                 !"FOREIGN".equalsIgnoreCase(peek().value) && 
+                                 !"CHECK".equalsIgnoreCase(peek().value))) {
+                                constraintName = peek().value;
+                                consume();
+                            }
+                            SqlToken afterConstraint = peek();
+                            if (afterConstraint.type == SqlToken.Type.KEYWORD) {
+                                String subOp = afterConstraint.value.toUpperCase();
+                                consume();
+                                if ("UNIQUE".equals(subOp)) {
+                                    if (peek().type == SqlToken.Type.KEYWORD && "KEY".equalsIgnoreCase(peek().value)) {
+                                        consume();
+                                    }
+                                    operations.add(parseAddUnique(tableName, constraintName));
+                                } else if ("PRIMARY".equals(subOp)) {
+                                    expectKeyword("KEY", "Expected 'KEY' after 'PRIMARY'");
+                                    operations.add(parseAddPrimaryKey(tableName));
+                                } else if ("FOREIGN".equals(subOp)) {
+                                    expectKeyword("KEY", "Expected 'KEY' after 'FOREIGN'");
+                                    operations.add(parseAddForeignKey(tableName));
+                                } else if ("CHECK".equals(subOp)) {
+                                    operations.add(parseAddCheck(tableName));
+                                } else {
+                                    throw new SqlSyntaxException("Expected UNIQUE, PRIMARY KEY, FOREIGN KEY, or CHECK after CONSTRAINT name", afterConstraint.position);
+                                }
+                            } else {
+                                throw new SqlSyntaxException("Expected UNIQUE, PRIMARY KEY, FOREIGN KEY, or CHECK after CONSTRAINT name", afterConstraint.position);
+                            }
+                        } else if ("COLUMN".equals(nextVal)) {
+                            consume(); // COLUMN
+                            operations.add(parseAddColumn(tableName));
+                        } else if ("PRIMARY".equals(nextVal)) {
+                            consume(); // PRIMARY
+                            expectKeyword("KEY", "Expected 'KEY' after 'PRIMARY'");
+                            operations.add(parseAddPrimaryKey(tableName));
+                        } else if ("FOREIGN".equals(nextVal)) {
+                            consume(); // FOREIGN
+                            expectKeyword("KEY", "Expected 'KEY' after 'FOREIGN'");
+                            operations.add(parseAddForeignKey(tableName));
+                        } else if ("UNIQUE".equals(nextVal)) {
+                            consume(); // UNIQUE
                             if (peek().type == SqlToken.Type.KEYWORD && "KEY".equalsIgnoreCase(peek().value)) {
                                 consume();
                             }
-                            return parseAddUnique(tableName, constraintName);
-                        } else if ("PRIMARY".equals(subOp)) {
-                            expectKeyword("KEY", "Expected 'KEY' after 'PRIMARY'");
-                            return parseAddPrimaryKey(tableName);
-                        } else if ("FOREIGN".equals(subOp)) {
-                            expectKeyword("KEY", "Expected 'KEY' after 'FOREIGN'");
-                            return parseAddForeignKey(tableName);
-                        } else if ("CHECK".equals(subOp)) {
-                            return parseAddCheck(tableName);
+                            operations.add(parseAddUnique(tableName));
+                        } else if ("INDEX".equals(nextVal)) {
+                            consume(); // INDEX
+                            operations.add(parseAddIndex(tableName, "BTREE"));
+                        } else if ("FULLTEXT".equals(nextVal) || "SPATIAL".equals(nextVal)) {
+                            consume(); // FULLTEXT / SPATIAL
+                            if (peek().type == SqlToken.Type.KEYWORD && ("INDEX".equalsIgnoreCase(peek().value) || "KEY".equalsIgnoreCase(peek().value))) {
+                                consume(); // INDEX / KEY
+                            }
+                            operations.add(parseAddIndex(tableName, nextVal.toUpperCase()));
+                        } else if ("CHECK".equals(nextVal)) {
+                            consume(); // CHECK
+                            operations.add(parseAddCheck(tableName));
+                        } else {
+                            operations.add(parseAddColumn(tableName));
                         }
+                    } else {
+                        operations.add(parseAddColumn(tableName));
                     }
-                    throw new SqlSyntaxException("Expected UNIQUE, PRIMARY KEY, FOREIGN KEY, or CHECK after CONSTRAINT name", afterConstraint.position);
-                } else if ("COLUMN".equals(nextVal)) {
-                    consume(); // COLUMN
-                    return parseAddColumn(tableName);
-                } else if ("PRIMARY".equals(nextVal)) {
-                    consume(); // PRIMARY
-                    expectKeyword("KEY", "Expected 'KEY' after 'PRIMARY'");
-                    return parseAddPrimaryKey(tableName);
-                } else if ("FOREIGN".equals(nextVal)) {
-                    consume(); // FOREIGN
-                    expectKeyword("KEY", "Expected 'KEY' after 'FOREIGN'");
-                    return parseAddForeignKey(tableName);
-                } else if ("UNIQUE".equals(nextVal)) {
-                    consume(); // UNIQUE
-                    if (peek().type == SqlToken.Type.KEYWORD && "KEY".equalsIgnoreCase(peek().value)) {
+                }
+            } else if ("MODIFY".equals(op)) {
+                if (peek().type == SqlToken.Type.KEYWORD && "COLUMN".equalsIgnoreCase(peek().value)) {
+                    consume();
+                }
+                operations.add(parseModifyColumn(tableName));
+            } else if ("CHANGE".equals(op)) {
+                if (peek().type == SqlToken.Type.KEYWORD && "COLUMN".equalsIgnoreCase(peek().value)) {
+                    consume();
+                }
+                operations.add(parseChangeColumn(tableName));
+            } else if ("RENAME".equals(op)) {
+                SqlToken next = peek();
+                if (next.type == SqlToken.Type.KEYWORD) {
+                    String nextVal = next.value.toUpperCase();
+                    if ("COLUMN".equals(nextVal)) {
+                        consume(); // COLUMN
+                        operations.add(parseRenameColumn(tableName));
+                    } else if ("TO".equals(nextVal)) {
+                        consume(); // TO
+                        expect(SqlToken.Type.IDENTIFIER, "Expected new table name");
+                        String newTableName = tokens.get(pos - 1).value;
+                        operations.add(new Command.AlterTable(tableName, "RENAME_TABLE", (String) null, newTableName));
+                    } else {
+                        throw new SqlSyntaxException("Expected COLUMN or TO after RENAME", next.position);
+                    }
+                } else {
+                    throw new SqlSyntaxException("Expected COLUMN or TO after RENAME", next.position);
+                }
+            } else if ("DROP".equals(op)) {
+                SqlToken next = peek();
+                if (next.type == SqlToken.Type.KEYWORD) {
+                    String nextVal = next.value.toUpperCase();
+                    if ("COLUMN".equals(nextVal)) {
+                        consume(); // COLUMN
+                        expect(SqlToken.Type.IDENTIFIER, "Expected column name to drop");
+                        String col = tokens.get(pos - 1).value;
+                        operations.add(new Command.AlterTable(tableName, "DROP_COLUMN", col));
+                    } else if ("PRIMARY".equals(nextVal)) {
+                        consume(); // PRIMARY
+                        expectKeyword("KEY", "Expected 'KEY' after 'DROP PRIMARY'");
+                        operations.add(new Command.AlterTable(tableName, "DROP_PRIMARY_KEY"));
+                    } else if ("FOREIGN".equals(nextVal)) {
+                        consume(); // FOREIGN
+                        expectKeyword("KEY", "Expected 'KEY' after 'DROP FOREIGN'");
+                        expect(SqlToken.Type.IDENTIFIER, "Expected foreign key constraint name to drop");
+                        String fk = tokens.get(pos - 1).value;
+                        operations.add(new Command.AlterTable(tableName, "DROP_FOREIGN_KEY", fk));
+                    } else if ("INDEX".equals(nextVal) || "KEY".equals(nextVal)) {
                         consume();
+                        expect(SqlToken.Type.IDENTIFIER, "Expected index name to drop");
+                        String idx = tokens.get(pos - 1).value;
+                        operations.add(new Command.AlterTable(tableName, "DROP_INDEX", idx));
+                    } else if ("CHECK".equals(nextVal)) {
+                        consume(); // CHECK
+                        expect(SqlToken.Type.IDENTIFIER, "Expected check constraint name to drop");
+                        String chkName = tokens.get(pos - 1).value;
+                        operations.add(new Command.AlterTable(tableName, "DROP_CHECK", chkName));
+                    } else {
+                        expect(SqlToken.Type.IDENTIFIER, "Expected column name to drop");
+                        String col = tokens.get(pos - 1).value;
+                        operations.add(new Command.AlterTable(tableName, "DROP_COLUMN", col));
                     }
-                    return parseAddUnique(tableName);
-                } else if ("INDEX".equals(nextVal)) {
-                    consume(); // INDEX
-                    return parseAddIndex(tableName, "BTREE");
-                } else if ("FULLTEXT".equals(nextVal) || "SPATIAL".equals(nextVal)) {
-                    consume(); // FULLTEXT / SPATIAL
-                    if (peek().type == SqlToken.Type.KEYWORD && ("INDEX".equalsIgnoreCase(peek().value) || "KEY".equalsIgnoreCase(peek().value))) {
-                        consume(); // INDEX / KEY
-                    }
-                    return parseAddIndex(tableName, nextVal.toUpperCase());
-                } else if ("CHECK".equals(nextVal)) {
-                    consume(); // CHECK
-                    return parseAddCheck(tableName);
-                } else {
-                    return parseAddColumn(tableName);
-                }
-            } else {
-                return parseAddColumn(tableName);
-            }
-        } else if ("MODIFY".equals(op)) {
-            if (peek().type == SqlToken.Type.KEYWORD && "COLUMN".equalsIgnoreCase(peek().value)) {
-                consume();
-            }
-            return parseModifyColumn(tableName);
-        } else if ("CHANGE".equals(op)) {
-            if (peek().type == SqlToken.Type.KEYWORD && "COLUMN".equalsIgnoreCase(peek().value)) {
-                consume();
-            }
-            return parseChangeColumn(tableName);
-        } else if ("RENAME".equals(op)) {
-            SqlToken next = peek();
-            if (next.type == SqlToken.Type.KEYWORD) {
-                String nextVal = next.value.toUpperCase();
-                if ("COLUMN".equals(nextVal)) {
-                    consume(); // COLUMN
-                    return parseRenameColumn(tableName);
-                } else if ("TO".equals(nextVal)) {
-                    consume(); // TO
-                    expect(SqlToken.Type.IDENTIFIER, "Expected new table name");
-                    String newTableName = tokens.get(pos - 1).value;
-                    return new Command.AlterTable(tableName, "RENAME_TABLE", (String) null, newTableName);
-                }
-            }
-            throw new SqlSyntaxException("Expected COLUMN or TO after RENAME", next.position);
-        } else if ("DROP".equals(op)) {
-            SqlToken next = peek();
-            if (next.type == SqlToken.Type.KEYWORD) {
-                String nextVal = next.value.toUpperCase();
-                if ("COLUMN".equals(nextVal)) {
-                    consume(); // COLUMN
-                    expect(SqlToken.Type.IDENTIFIER, "Expected column name to drop");
-                    String col = tokens.get(pos - 1).value;
-                    return new Command.AlterTable(tableName, "DROP_COLUMN", col);
-                } else if ("PRIMARY".equals(nextVal)) {
-                    consume(); // PRIMARY
-                    expectKeyword("KEY", "Expected 'KEY' after 'DROP PRIMARY'");
-                    return new Command.AlterTable(tableName, "DROP_PRIMARY_KEY");
-                } else if ("FOREIGN".equals(nextVal)) {
-                    consume(); // FOREIGN
-                    expectKeyword("KEY", "Expected 'KEY' after 'DROP FOREIGN'");
-                    expect(SqlToken.Type.IDENTIFIER, "Expected foreign key constraint name to drop");
-                    String fk = tokens.get(pos - 1).value;
-                    return new Command.AlterTable(tableName, "DROP_FOREIGN_KEY", fk);
-                } else if ("INDEX".equals(nextVal) || "KEY".equals(nextVal)) {
-                    consume();
-                    expect(SqlToken.Type.IDENTIFIER, "Expected index name to drop");
-                    String idx = tokens.get(pos - 1).value;
-                    return new Command.AlterTable(tableName, "DROP_INDEX", idx);
-                } else if ("CHECK".equals(nextVal)) {
-                    consume(); // CHECK
-                    expect(SqlToken.Type.IDENTIFIER, "Expected check constraint name to drop");
-                    String chkName = tokens.get(pos - 1).value;
-                    return new Command.AlterTable(tableName, "DROP_CHECK", chkName);
                 } else {
                     expect(SqlToken.Type.IDENTIFIER, "Expected column name to drop");
                     String col = tokens.get(pos - 1).value;
-                    return new Command.AlterTable(tableName, "DROP_COLUMN", col);
+                    operations.add(new Command.AlterTable(tableName, "DROP_COLUMN", col));
                 }
-            } else {
-                expect(SqlToken.Type.IDENTIFIER, "Expected column name to drop");
-                String col = tokens.get(pos - 1).value;
-                return new Command.AlterTable(tableName, "DROP_COLUMN", col);
-            }
-        } else if ("ALTER".equals(op)) {
-            if (peek().type == SqlToken.Type.KEYWORD && "COLUMN".equalsIgnoreCase(peek().value)) {
-                consume();
-            }
-            expect(SqlToken.Type.IDENTIFIER, "Expected column name in ALTER COLUMN");
-            String colName = tokens.get(pos - 1).value;
-            if (matchKeyword("SET")) {
-                if (matchKeyword("DEFAULT")) {
-                    SqlToken defaultValToken = peek();
-                    String defVal = defaultValToken.value;
+            } else if ("ALTER".equals(op)) {
+                if (peek().type == SqlToken.Type.KEYWORD && "COLUMN".equalsIgnoreCase(peek().value)) {
                     consume();
-                    return new Command.AlterTable(tableName, "DEFAULT_VALUE_CHANGE", colName, defVal, false);
-                } else if (matchKeyword("ON")) {
-                    expectKeyword("UPDATE", "Expected 'UPDATE' after 'SET ON'");
-                    SqlToken updateValToken = peek();
-                    String updateVal = updateValToken.value;
-                    consume();
-                    return new Command.AlterTable(tableName, "ON_UPDATE_CHANGE", colName, updateVal, false, true);
-                } else {
-                    throw new SqlSyntaxException("Expected DEFAULT or ON UPDATE after ALTER COLUMN col SET", peek().position);
                 }
-            } else if (matchKeyword("DROP")) {
-                if (matchKeyword("DEFAULT")) {
-                    return new Command.AlterTable(tableName, "DEFAULT_VALUE_CHANGE", colName, null, true);
-                } else if (matchKeyword("ON")) {
-                    expectKeyword("UPDATE", "Expected 'UPDATE' after 'DROP ON'");
-                    return new Command.AlterTable(tableName, "ON_UPDATE_CHANGE", colName, null, true, true);
+                expect(SqlToken.Type.IDENTIFIER, "Expected column name in ALTER COLUMN");
+                String colName = tokens.get(pos - 1).value;
+                if (matchKeyword("SET")) {
+                    if (matchKeyword("DEFAULT")) {
+                        SqlToken defaultValToken = peek();
+                        String defVal = defaultValToken.value;
+                        consume();
+                        operations.add(new Command.AlterTable(tableName, "DEFAULT_VALUE_CHANGE", colName, defVal, false));
+                    } else if (matchKeyword("ON")) {
+                        expectKeyword("UPDATE", "Expected 'UPDATE' after 'SET ON'");
+                        SqlToken updateValToken = peek();
+                        String updateVal = updateValToken.value;
+                        consume();
+                        operations.add(new Command.AlterTable(tableName, "ON_UPDATE_CHANGE", colName, updateVal, false, true));
+                    } else {
+                        throw new SqlSyntaxException("Expected DEFAULT or ON UPDATE after ALTER COLUMN col SET", peek().position);
+                    }
+                } else if (matchKeyword("DROP")) {
+                    if (matchKeyword("DEFAULT")) {
+                        operations.add(new Command.AlterTable(tableName, "DEFAULT_VALUE_CHANGE", colName, null, true));
+                    } else if (matchKeyword("ON")) {
+                        expectKeyword("UPDATE", "Expected 'UPDATE' after 'DROP ON'");
+                        operations.add(new Command.AlterTable(tableName, "ON_UPDATE_CHANGE", colName, null, true, true));
+                    } else {
+                        throw new SqlSyntaxException("Expected DEFAULT or ON UPDATE after ALTER COLUMN col DROP", peek().position);
+                    }
                 } else {
-                    throw new SqlSyntaxException("Expected DEFAULT or ON UPDATE after ALTER COLUMN col DROP", peek().position);
+                    throw new SqlSyntaxException("Expected SET DEFAULT, SET ON UPDATE, DROP DEFAULT or DROP ON UPDATE", peek().position);
                 }
-            }
-            throw new SqlSyntaxException("Expected SET DEFAULT, SET ON UPDATE, DROP DEFAULT or DROP ON UPDATE", peek().position);
-        } else if ("ENGINE".equals(op)) {
-            matchSymbol("=");
-            expect(SqlToken.Type.IDENTIFIER, "Expected engine name");
-            String eng = tokens.get(pos - 1).value;
-            return Command.AlterTable.createEngineOrCharSet(tableName, "ENGINE_CHANGE", eng);
-        } else if ("CHARACTER".equals(op)) {
-            expectKeyword("SET", "Expected 'SET' after 'CHARACTER'");
-            expect(SqlToken.Type.IDENTIFIER, "Expected character set name");
-            String cs = tokens.get(pos - 1).value;
-            return Command.AlterTable.createEngineOrCharSet(tableName, "CHARACTER_SET_CHANGE", cs);
-        } else if ("CONVERT".equals(op)) {
-            expectKeyword("TO", "Expected 'TO' after 'CONVERT'");
-            String charset = null;
-            if (matchName("CHARACTER")) {
+            } else if ("ENGINE".equals(op)) {
+                matchSymbol("=");
+                expect(SqlToken.Type.IDENTIFIER, "Expected engine name");
+                String eng = tokens.get(pos - 1).value;
+                operations.add(Command.AlterTable.createEngineOrCharSet(tableName, "ENGINE_CHANGE", eng));
+            } else if ("CHARACTER".equals(op)) {
                 expectKeyword("SET", "Expected 'SET' after 'CHARACTER'");
-            } else {
-                expectKeyword("CHARSET", "Expected 'CHARACTER SET' or 'CHARSET' after 'CONVERT TO'");
-            }
-            SqlToken csToken = peek();
-            if (csToken.type != SqlToken.Type.IDENTIFIER && csToken.type != SqlToken.Type.KEYWORD) {
-                throw new SqlSyntaxException("Expected character set name", csToken.position);
-            }
-            charset = csToken.value;
-            consume();
-
-            String collation = null;
-            if (matchName("COLLATE")) {
-                SqlToken collToken = peek();
-                if (collToken.type != SqlToken.Type.IDENTIFIER && collToken.type != SqlToken.Type.KEYWORD) {
-                    throw new SqlSyntaxException("Expected collation name", collToken.position);
+                expect(SqlToken.Type.IDENTIFIER, "Expected character set name");
+                String cs = tokens.get(pos - 1).value;
+                operations.add(Command.AlterTable.createEngineOrCharSet(tableName, "CHARACTER_SET_CHANGE", cs));
+            } else if ("CONVERT".equals(op)) {
+                expectKeyword("TO", "Expected 'TO' after 'CONVERT'");
+                String charset = null;
+                if (matchName("CHARACTER")) {
+                    expectKeyword("SET", "Expected 'SET' after 'CHARACTER'");
+                } else {
+                    expectKeyword("CHARSET", "Expected 'CHARACTER SET' or 'CHARSET' after 'CONVERT TO'");
                 }
-                collation = collToken.value;
+                SqlToken csToken = peek();
+                if (csToken.type != SqlToken.Type.IDENTIFIER && csToken.type != SqlToken.Type.KEYWORD) {
+                    throw new SqlSyntaxException("Expected character set name", csToken.position);
+                }
+                charset = csToken.value;
                 consume();
+
+                String collation = null;
+                if (matchName("COLLATE")) {
+                    SqlToken collToken = peek();
+                    if (collToken.type != SqlToken.Type.IDENTIFIER && collToken.type != SqlToken.Type.KEYWORD) {
+                        throw new SqlSyntaxException("Expected collation name", collToken.position);
+                    }
+                    collation = collToken.value;
+                    consume();
+                }
+                operations.add(new Command.AlterTableConvert(tableName, charset, collation));
+            } else {
+                throw new SqlSyntaxException("Unsupported ALTER TABLE operation: " + op, opToken.position);
             }
-            return new Command.AlterTableConvert(tableName, charset, collation);
+        } while (matchSymbol(","));
+
+        if (operations.size() == 1) {
+            return operations.get(0);
         }
-        
-        throw new SqlSyntaxException("Unsupported ALTER TABLE operation: " + op, opToken.position);
+        return new Command.AlterTableBatch(operations);
     }
 
     private Command parseTruncate() throws SqlSyntaxException {

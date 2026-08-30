@@ -3096,5 +3096,566 @@ public class SqlEngineTest {
 
         engine.execute("DROP DATABASE update_test_db;");
     }
+
+    @Test
+    public void testPocketSQLBugsFixes() {
+        engine.execute("CREATE DATABASE bug_test_db;");
+        engine.execute("USE bug_test_db;");
+
+        // 1. Test Window Functions & Cumulative Revenue
+        engine.execute("CREATE TABLE Orders (order_date TEXT, total_amount DOUBLE, customer_id INT);");
+        engine.execute("INSERT INTO Orders VALUES ('2023-01-10', 100.0, 1), ('2023-01-11', 200.0, 1), ('2023-01-12', 150.0, 2);");
+        QueryResult rWin = engine.execute("SELECT order_date, SUM(total_amount) OVER (ORDER BY order_date) AS cumulative_revenue FROM Orders;");
+        assertTrue(rWin.message, rWin.success);
+        assertEquals(3, rWin.rows.size());
+        assertEquals(100.0, ((Number) rWin.rows.get(0).get("cumulative_revenue")).doubleValue(), 0.001);
+        assertEquals(300.0, ((Number) rWin.rows.get(1).get("cumulative_revenue")).doubleValue(), 0.001);
+        assertEquals(450.0, ((Number) rWin.rows.get(2).get("cumulative_revenue")).doubleValue(), 0.001);
+
+        // 2. Test ORDER BY alias in GROUP BY query (no ClassCastException)
+        engine.execute("CREATE TABLE Employee (department_id INT, salary DOUBLE);");
+        engine.execute("INSERT INTO Employee VALUES (1, 5000), (1, 7000), (2, 8000), (2, 10000);");
+        QueryResult rGroup = engine.execute("SELECT department_id, AVG(salary) AS avg_salary FROM Employee GROUP BY department_id ORDER BY avg_salary DESC;");
+        assertTrue(rGroup.message, rGroup.success);
+        assertEquals(2, rGroup.rows.size());
+        assertEquals(2, ((Number) rGroup.rows.get(0).get("department_id")).intValue());
+
+        // 3. Test CTE (WITH clause)
+        QueryResult rCte = engine.execute("WITH customer_orders AS (SELECT customer_id, COUNT(*) AS order_count FROM Orders GROUP BY customer_id) SELECT * FROM customer_orders WHERE order_count >= 1;");
+        assertTrue("CTE failed: " + rCte.message, rCte.success);
+        assertEquals(2, rCte.rows.size());
+
+        // 4. Test Aggregate Math MAX(salary) - MIN(salary)
+        QueryResult rAggMath = engine.execute("SELECT department_id, MAX(salary) - MIN(salary) AS salary_diff FROM Employee GROUP BY department_id ORDER BY department_id;");
+        assertTrue(rAggMath.message, rAggMath.success);
+        assertEquals(2, rAggMath.rows.size());
+        assertEquals(2000.0, ((Number) rAggMath.rows.get(0).get("salary_diff")).doubleValue(), 0.001);
+        assertEquals(2000.0, ((Number) rAggMath.rows.get(1).get("salary_diff")).doubleValue(), 0.001);
+
+        // 5. Test ALTER TABLE ADD PRIMARY KEY reflects PRI in DESC
+        engine.execute("CREATE TABLE USERS (id INT, name TEXT, age INT);");
+        engine.execute("ALTER TABLE USERS ADD CONSTRAINT pk_users_id PRIMARY KEY (id);");
+        QueryResult rDesc = engine.execute("DESC USERS;");
+        assertTrue(rDesc.message, rDesc.success);
+        assertEquals("PRI", rDesc.rows.get(0).get("Key"));
+        assertEquals("NO", rDesc.rows.get(0).get("Null"));
+
+        // 6. Test INSERT INTO SELECT
+        engine.execute("DROP TABLE IF EXISTS USERS, USERS_NEW, USERS_COPY;");
+        engine.execute("CREATE TABLE USERS (id INT, name TEXT, age INT);");
+        engine.execute("INSERT INTO USERS VALUES (1, 'Alice', 25), (2, 'Bob', 30);");
+        engine.execute("CREATE TABLE USERS_NEW (id INT, name TEXT, age INT);");
+        QueryResult rInsSelect = engine.execute("INSERT INTO USERS_NEW (id, name, age) SELECT id, name, age FROM USERS;");
+        assertTrue("INSERT INTO SELECT failed: " + rInsSelect.message, rInsSelect.success);
+
+        // 7. Test CREATE TABLE AS SELECT
+        engine.execute("DROP TABLE IF EXISTS USERS_COPY;");
+        QueryResult rCreateAs = engine.execute("CREATE TABLE USERS_COPY AS SELECT * FROM USERS;");
+        assertTrue("CREATE TABLE AS SELECT failed: " + rCreateAs.message, rCreateAs.success);
+        QueryResult rCopyDesc = engine.execute("DESC USERS_COPY;");
+        assertTrue(rCopyDesc.message, rCopyDesc.success);
+        assertEquals(3, rCopyDesc.rows.size());
+
+        // 8. Test ALTER TABLE ADD (multi columns)
+        QueryResult rAddMulti = engine.execute("ALTER TABLE USERS ADD (city VARCHAR(50), country VARCHAR(50));");
+        assertTrue(rAddMulti.message, rAddMulti.success);
+
+        // 9. Test ALTER TABLE AUTO_INCREMENT
+        QueryResult rAuto = engine.execute("ALTER TABLE USERS AUTO_INCREMENT = 1000;");
+        assertTrue(rAuto.message, rAuto.success);
+
+        engine.execute("DROP DATABASE bug_test_db;");
+    }
+
+    @Test
+    public void testDateFormatAndFormatFunctions() {
+        // 1. DATE_FORMAT tests
+        QueryResult r1 = engine.execute("SELECT DATE_FORMAT('2023-05-20 14:05:09', '%Y-%m-%d %H:%i:%s') AS formatted_dt;");
+        assertTrue(r1.message, r1.success);
+        assertEquals("2023-05-20 14:05:09", r1.rows.get(0).get("formatted_dt"));
+
+        QueryResult r2 = engine.execute("SELECT DATE_FORMAT('2023-05-20', '%W, %M %e, %Y') AS formatted_date;");
+        assertTrue(r2.message, r2.success);
+        assertEquals("Saturday, May 20, 2023", r2.rows.get(0).get("formatted_date"));
+
+        // 2. FORMAT (Numeric) tests
+        QueryResult r3 = engine.execute("SELECT FORMAT(1234567.8910, 2) AS num_fmt1;");
+        assertTrue(r3.message, r3.success);
+        assertEquals("1,234,567.89", r3.rows.get(0).get("num_fmt1"));
+
+        QueryResult r4 = engine.execute("SELECT FORMAT(1234567.8910, 0) AS num_fmt2;");
+        assertTrue(r4.message, r4.success);
+        assertEquals("1,234,568", r4.rows.get(0).get("num_fmt2"));
+
+        // 3. FORMAT (Locale & Smart Date pattern) tests
+        QueryResult r5 = engine.execute("SELECT FORMAT(1234567.8910, 2, 'de_DE') AS loc_fmt;");
+        assertTrue(r5.message, r5.success);
+        assertEquals("1.234.567,89", r5.rows.get(0).get("loc_fmt"));
+
+        QueryResult r6 = engine.execute("SELECT FORMAT('2023-05-20', '%Y/%m/%d') AS smart_date;");
+        assertTrue(r6.message, r6.success);
+        assertEquals("2023/05/20", r6.rows.get(0).get("smart_date"));
+    }
+
+    @Test
+    public void testDropMultipleTablesAndViews() {
+        engine.execute("CREATE DATABASE test_drop_db;");
+        engine.execute("USE test_drop_db;");
+        engine.execute("CREATE TABLE Sales (id INT);");
+        engine.execute("CREATE TABLE Returns (id INT);");
+        engine.execute("CREATE TABLE Orders (id INT);");
+
+        QueryResult rDrop = engine.execute("DROP TABLE IF EXISTS Sales, Returns, Orders, Customers, Employee, Department;");
+        assertTrue(rDrop.message, rDrop.success);
+
+        QueryResult rShow = engine.execute("SHOW TABLES;");
+        assertTrue(rShow.message, rShow.success);
+        assertEquals(0, rShow.rows.size());
+
+        engine.execute("DROP DATABASE test_drop_db;");
+    }
+
+    @Test
+    public void testMultiColumnGroupByWithHaving() {
+        engine.execute("CREATE DATABASE test_grp_db;");
+        engine.execute("USE test_grp_db;");
+        engine.execute("CREATE TABLE Employee (first_name TEXT, last_name TEXT, salary DOUBLE);");
+        engine.execute("INSERT INTO Employee VALUES ('John', 'Doe', 5000), ('John', 'Doe', 6000), ('Jane', 'Smith', 7000);");
+
+        QueryResult r = engine.execute("SELECT first_name, last_name, COUNT(*) AS duplicate_count FROM Employee GROUP BY first_name, last_name HAVING COUNT(*) > 1;");
+        assertTrue(r.message, r.success);
+        assertEquals(1, r.rows.size());
+        assertEquals("John", r.rows.get(0).get("first_name"));
+        assertEquals("Doe", r.rows.get(0).get("last_name"));
+        assertEquals(2L, ((Number) r.rows.get(0).get("duplicate_count")).longValue());
+
+        engine.execute("DROP DATABASE test_grp_db;");
+    }
+
+    @Test
+    public void testScalarSubqueryInWhereAndAppVersionInError() {
+        engine.execute("CREATE DATABASE test_subq_db;");
+        engine.execute("USE test_subq_db;");
+        engine.execute("CREATE TABLE Employee (id INT, salary DOUBLE);");
+        engine.execute("INSERT INTO Employee VALUES (1, 100), (2, 200), (3, 300);");
+
+        QueryResult rSub = engine.execute("SELECT MAX(salary) AS SecondHighestSalary FROM Employee WHERE salary < (SELECT MAX(salary) FROM Employee);");
+        assertTrue(rSub.message, rSub.success);
+        assertEquals(1, rSub.rows.size());
+        assertEquals(200.0, ((Number) rSub.rows.get(0).get("SecondHighestSalary")).doubleValue(), 0.001);
+
+        // Verify App Version appears in syntax error output
+        QueryResult rErr = engine.execute("SELECT * FROM;");
+        assertFalse(rErr.success);
+        assertTrue(rErr.message.contains("(1.0.1)"));
+
+        engine.execute("DROP DATABASE test_subq_db;");
+    }
+
+    @Test
+    public void testTableWildcardExpansionAndCteWithWindowFunction() {
+        engine.execute("CREATE DATABASE test_wildcard_cte;");
+        engine.execute("USE test_wildcard_cte;");
+        engine.execute("CREATE TABLE Employee (employee_id INT, first_name TEXT, last_name TEXT, department_id INT, salary DOUBLE, hire_date TEXT);");
+        engine.execute("CREATE TABLE Department (department_id INT, dept_name TEXT);");
+
+        engine.execute("INSERT INTO Employee VALUES (1, 'Alice', 'Smith', 10, 8000, '2020-01-01'), (2, 'Bob', 'Jones', NULL, 6000, '2021-02-01'), (3, 'Charlie', 'Brown', 10, 9000, '2019-03-01');");
+        engine.execute("INSERT INTO Department VALUES (10, 'Engineering');");
+
+        // 1. Table Wildcard (e.*) in LEFT JOIN
+        QueryResult rWildcard = engine.execute("SELECT e.* FROM Employee e LEFT JOIN Department d ON e.department_id = d.department_id WHERE d.department_id IS NULL;");
+        assertTrue("rWildcard error: " + rWildcard.message, rWildcard.success);
+        assertEquals(1, rWildcard.rows.size());
+        assertEquals("Bob", rWildcard.rows.get(0).get("first_name"));
+
+        // 2. CTE WITH SELECT *, DENSE_RANK() OVER (...)
+        QueryResult rCte = engine.execute("WITH RankedEmployees AS (" +
+                "    SELECT *, DENSE_RANK() OVER (ORDER BY salary DESC) AS rnk FROM Employee" +
+                ") " +
+                "SELECT employee_id, first_name, last_name, department_id, salary, hire_date FROM RankedEmployees WHERE rnk <= 3;");
+        assertTrue("rCte error: " + rCte.message, rCte.success);
+        assertEquals(3, rCte.rows.size());
+
+        engine.execute("DROP DATABASE test_wildcard_cte;");
+    }
+
+    @Test
+    public void testSumWithExpressionInAggregate() {
+        engine.execute("CREATE DATABASE test_sum_expr_db;");
+        engine.execute("USE test_sum_expr_db;");
+        engine.execute("CREATE TABLE Sales (product_id INT, quantity INT, price DOUBLE);");
+        engine.execute("INSERT INTO Sales VALUES (201, 2, 100.0), (201, 3, 50.0), (202, 1, 300.0), (203, 5, 20.0);");
+
+        QueryResult r = engine.execute("SELECT product_id, SUM(quantity * price) AS total_revenue FROM Sales GROUP BY product_id ORDER BY product_id;");
+        assertTrue("Query failed: " + r.message, r.success);
+        assertEquals(3, r.rows.size());
+
+        // Product 201: (2*100) + (3*50) = 350.0
+        assertEquals(201, ((Number) r.rows.get(0).get("product_id")).intValue());
+        assertEquals(350.0, ((Number) r.rows.get(0).get("total_revenue")).doubleValue(), 0.001);
+
+        // Product 202: 1*300 = 300.0
+        assertEquals(202, ((Number) r.rows.get(1).get("product_id")).intValue());
+        assertEquals(300.0, ((Number) r.rows.get(1).get("total_revenue")).doubleValue(), 0.001);
+
+        // Product 203: 5*20 = 100.0
+        assertEquals(203, ((Number) r.rows.get(2).get("product_id")).intValue());
+        assertEquals(100.0, ((Number) r.rows.get(2).get("total_revenue")).doubleValue(), 0.001);
+
+        engine.execute("DROP DATABASE test_sum_expr_db;");
+    }
+
+    @Test
+    public void testNotInSubqueryAndNotOperators() {
+        engine.execute("CREATE DATABASE test_notin_db;");
+        engine.execute("USE test_notin_db;");
+        engine.execute("CREATE TABLE Customers (customer_id INT, name TEXT);");
+        engine.execute("CREATE TABLE Orders (order_id INT, customer_id INT);");
+        engine.execute("CREATE TABLE Returns (return_id INT, customer_id INT);");
+
+        engine.execute("INSERT INTO Customers VALUES (1, 'Alice'), (2, 'Bob'), (3, 'Charlie');");
+        engine.execute("INSERT INTO Orders VALUES (101, 1), (102, 2), (103, 3);");
+        engine.execute("INSERT INTO Returns VALUES (201, 2);"); // Bob returned an item
+
+        QueryResult r = engine.execute("SELECT DISTINCT c.customer_id " +
+                "FROM Customers c " +
+                "JOIN Orders o ON c.customer_id = o.customer_id " +
+                "WHERE c.customer_id NOT IN ( " +
+                "    SELECT customer_id FROM Returns " +
+                ");");
+
+        assertTrue("Query failed: " + r.message, r.success);
+        assertEquals(2, r.rows.size()); // Alice (1) and Charlie (3)
+
+        engine.execute("DROP DATABASE test_notin_db;");
+    }
+
+    @Test
+    public void testFunctionInWhereClause() {
+        engine.execute("CREATE DATABASE test_where_func_db;");
+        engine.execute("USE test_where_func_db;");
+        engine.execute("CREATE TABLE Employee (employee_id INT, first_name TEXT, hire_date DATE);");
+        engine.execute("INSERT INTO Employee VALUES (1, 'John', '2022-01-15'), (2, 'Jane', '2023-04-10'), (3, 'Bob', '2023-09-20');");
+
+        QueryResult r = engine.execute("SELECT * FROM Employee WHERE YEAR(hire_date) = 2023;");
+        assertTrue("Query failed: " + r.message, r.success);
+        assertEquals(2, r.rows.size());
+        assertEquals(2, ((Number) r.rows.get(0).get("employee_id")).intValue());
+        assertEquals(3, ((Number) r.rows.get(1).get("employee_id")).intValue());
+
+        engine.execute("DROP DATABASE test_where_func_db;");
+    }
+
+    @Test
+    public void testDerivedTableInFromClause() {
+        engine.execute("CREATE DATABASE test_derived_from_db;");
+        engine.execute("USE test_derived_from_db;");
+        engine.execute("CREATE TABLE Orders (order_id INT, customer_id INT);");
+        // Customer 101 has 6 orders (> 5), Customer 102 has 2 orders
+        engine.execute("INSERT INTO Orders VALUES (1, 101), (2, 101), (3, 101), (4, 101), (5, 101), (6, 101), (7, 102), (8, 102);");
+
+        QueryResult r = engine.execute("SELECT COUNT(*) AS customer_count " +
+                "FROM ( " +
+                "    SELECT customer_id FROM Orders " +
+                "    GROUP BY customer_id " +
+                "    HAVING COUNT(*) > 5 " +
+                ") AS subquery;");
+
+        assertTrue("Query failed: " + r.message, r.success);
+        assertEquals(1, r.rows.size());
+        assertEquals(1L, ((Number) r.rows.get(0).get("customer_count")).longValue());
+
+        engine.execute("DROP DATABASE test_derived_from_db;");
+    }
+
+    @Test
+    public void testDayNameAndDateNameFunctions() {
+        engine.execute("CREATE DATABASE test_dayname_db;");
+        engine.execute("USE test_dayname_db;");
+        engine.execute("CREATE TABLE Employee (employee_id INT, first_name TEXT, hire_date DATE);");
+        // 2023-04-15 is a Saturday, 2023-04-16 is a Sunday, 2023-04-17 is a Monday
+        engine.execute("INSERT INTO Employee VALUES (1, 'Alice', '2023-04-15'), (2, 'Bob', '2023-04-16'), (3, 'Charlie', '2023-04-17');");
+
+        // Test DAYNAME
+        QueryResult r1 = engine.execute("SELECT * FROM Employee WHERE DAYNAME(hire_date) IN ('Saturday', 'Sunday') ORDER BY employee_id;");
+        assertTrue("r1 failed: " + r1.message, r1.success);
+        assertEquals(2, r1.rows.size());
+        assertEquals(1, ((Number) r1.rows.get(0).get("employee_id")).intValue());
+        assertEquals(2, ((Number) r1.rows.get(1).get("employee_id")).intValue());
+
+        // Test DATENAME(WEEKDAY, hire_date)
+        QueryResult r2 = engine.execute("SELECT * FROM Employee WHERE DATENAME(WEEKDAY, hire_date) IN ('Saturday', 'Sunday') ORDER BY employee_id;");
+        assertTrue("r2 failed: " + r2.message, r2.success);
+        assertEquals(2, r2.rows.size());
+        assertEquals(1, ((Number) r2.rows.get(0).get("employee_id")).intValue());
+        assertEquals(2, ((Number) r2.rows.get(1).get("employee_id")).intValue());
+
+        engine.execute("DROP DATABASE test_dayname_db;");
+    }
+
+    @Test
+    public void testGroupByFunctionExpression() {
+        engine.execute("CREATE DATABASE test_groupby_func_db;");
+        engine.execute("USE test_groupby_func_db;");
+        engine.execute("CREATE TABLE Orders (order_id INT, date DATE, amount DOUBLE);");
+        engine.execute("INSERT INTO Orders VALUES (1, '2023-04-10', 100.0), (2, '2023-04-15', 150.0), (3, '2023-05-01', 200.0);");
+
+        QueryResult r = engine.execute("SELECT " +
+                "    FORMAT(date, 'yyyy-MM') AS month, " +
+                "    SUM(amount) AS total_revenue, " +
+                "    COUNT(order_id) AS order_count " +
+                "FROM Orders " +
+                "GROUP BY " +
+                "    FORMAT(date, 'yyyy-MM');");
+
+        assertTrue("Query failed: " + r.message, r.success);
+        assertEquals(2, r.rows.size());
+        assertEquals("2023-04", r.rows.get(0).get("month"));
+        assertEquals(250.0, ((Number) r.rows.get(0).get("total_revenue")).doubleValue(), 0.001);
+        assertEquals(2L, ((Number) r.rows.get(0).get("order_count")).longValue());
+
+        engine.execute("DROP DATABASE test_groupby_func_db;");
+    }
+
+    @Test
+    public void testHavingExpressionWithInterval() {
+        engine.execute("CREATE DATABASE test_having_expr_db;");
+        engine.execute("USE test_having_expr_db;");
+        engine.execute("CREATE TABLE Orders (customer_id INT, order_date DATE);");
+        engine.execute("INSERT INTO Orders VALUES (101, '2020-01-15'), (102, '2026-08-01');");
+
+        QueryResult r = engine.execute("SELECT customer_id " +
+                "FROM Orders " +
+                "GROUP BY customer_id " +
+                "HAVING MAX(order_date) < CURDATE() - INTERVAL 6 MONTH;");
+
+        assertTrue("Query failed: " + r.message, r.success);
+        assertEquals("Expected 1 row (only customer 101 in interval test), got rows: " + r.rows, 1, r.rows.size());
+        assertEquals(101, ((Number) r.rows.get(0).get("customer_id")).intValue());
+
+        engine.execute("DROP DATABASE test_having_expr_db;");
+    }
+
+    @Test
+    public void testHavingMaxDateInterval() {
+        engine.execute("CREATE DATABASE test_having_date_db;");
+        engine.execute("USE test_having_date_db;");
+        engine.execute("CREATE TABLE Orders (customer_id INT, order_date DATE);");
+        // customer 101 last ordered in 2020 (> 6 months ago), customer 102 recently
+        engine.execute("INSERT INTO Orders VALUES (101, '2020-01-15'), (102, '2026-08-01');");
+
+        // Test with a fixed past date so the result is deterministic
+        QueryResult r = engine.execute("SELECT customer_id " +
+                "FROM Orders " +
+                "GROUP BY customer_id " +
+                "HAVING MAX(order_date) < '2026-02-01';");
+
+        assertTrue("Query failed: " + r.message, r.success);
+        assertEquals("Expected 1 row (only customer 101), got: " + r.rows, 1, r.rows.size());
+        assertEquals(101, ((Number) r.rows.get(0).get("customer_id")).intValue());
+
+        engine.execute("DROP DATABASE test_having_date_db;");
+    }
+
+    @Test
+    public void testCteWithDotQualifiedGroupBy() {
+        engine.execute("CREATE DATABASE test_cte_dot_db;");
+        engine.execute("USE test_cte_dot_db;");
+        engine.execute("CREATE TABLE Sales (product_id INT, quantity INT, price DOUBLE);");
+        engine.execute("INSERT INTO Sales VALUES (1, 2, 10.0), (1, 3, 10.0), (2, 1, 50.0);");
+
+        QueryResult r = engine.execute("WITH TotalRevenue AS ( " +
+                "    SELECT SUM(quantity * price) AS total " +
+                "    FROM Sales " +
+                ") " +
+                "SELECT s.product_id, " +
+                "SUM(s.quantity * s.price) AS revenue, " +
+                "SUM(s.quantity * s.price) * 100.0 / t.total AS revenue_pct " +
+                "FROM Sales s " +
+                "CROSS JOIN TotalRevenue t " +
+                "GROUP BY s.product_id, t.total ORDER BY s.product_id;");
+
+        assertTrue("Query failed: " + r.message, r.success);
+        assertEquals(2, r.rows.size());
+        assertEquals(1, ((Number) r.rows.get(0).get("product_id")).intValue());
+        assertEquals(50.0, ((Number) r.rows.get(0).get("revenue")).doubleValue(), 0.001);
+        assertEquals(50.0, ((Number) r.rows.get(0).get("revenue_pct")).doubleValue(), 0.001);
+
+        engine.execute("DROP DATABASE test_cte_dot_db;");
+    }
+
+    @Test
+    public void testGroupByWithSubqueryInProjection() {
+        engine.execute("CREATE DATABASE test_subq_proj_db;");
+        engine.execute("USE test_subq_proj_db;");
+        engine.execute("CREATE TABLE Employee (employee_id INT, department_id INT);");
+        // 8 total employees: 3 in dept 1, 3 in dept 2, 1 in dept 3, 1 in NULL dept
+        engine.execute("INSERT INTO Employee VALUES (1, 1), (2, 1), (3, 1), (4, 2), (5, 2), (6, 2), (7, 3), (8, NULL);");
+
+        QueryResult r = engine.execute("SELECT " +
+                "    department_id, " +
+                "    COUNT(*) AS emp_count, " +
+                "    COUNT(*) * 100.0 / (SELECT COUNT(*) FROM Employee) AS pct " +
+                "FROM Employee " +
+                "GROUP BY department_id ORDER BY emp_count DESC, department_id;");
+
+        assertTrue("Query failed: " + r.message, r.success);
+        assertEquals(4, r.rows.size());
+
+        // Dept 1: count=3, pct=37.5
+        assertEquals(3L, ((Number) r.rows.get(0).get("emp_count")).longValue());
+        assertEquals(37.5, ((Number) r.rows.get(0).get("pct")).doubleValue(), 0.001);
+
+        // Dept 2: count=3, pct=37.5
+        assertEquals(3L, ((Number) r.rows.get(1).get("emp_count")).longValue());
+        assertEquals(37.5, ((Number) r.rows.get(1).get("pct")).doubleValue(), 0.001);
+
+        engine.execute("DROP DATABASE test_subq_proj_db;");
+    }
+
+    @Test
+    public void testParetoAnalysisWithMultipleCtesAndCommaJoins() {
+        engine.execute("CREATE DATABASE test_pareto_db;");
+        engine.execute("USE test_pareto_db;");
+        engine.execute("CREATE TABLE Sales (product_id INT, quantity INT, price DOUBLE);");
+        // Total revenue = (5*100) + (3*50) + (1*20) = 500 + 150 + 20 = 670.0
+        // 80% of total = 536.0
+        engine.execute("INSERT INTO Sales VALUES (1, 5, 100.0), (2, 3, 50.0), (3, 1, 20.0);");
+
+        // Query 1: Implicit comma join with multiple CTEs
+        QueryResult r1 = engine.execute("WITH sales_cte AS ( " +
+                "    SELECT product_id, SUM(quantity * price) AS revenue " +
+                "    FROM Sales " +
+                "    GROUP BY product_id " +
+                "), " +
+                "total_revenue AS ( " +
+                "    SELECT SUM(revenue) AS total " +
+                "    FROM sales_cte " +
+                ") " +
+                "SELECT s.product_id, s.revenue, " +
+                "SUM(s.revenue) OVER ( " +
+                "    ORDER BY s.revenue DESC " +
+                "    ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW " +
+                ") AS running_total " +
+                "FROM sales_cte s, total_revenue t;");
+
+        if (!r1.success) System.out.println("R1 ERROR: " + r1.message);
+        assertTrue("r1 failed: " + r1.message, r1.success);
+        assertEquals(3, r1.rows.size());
+
+        // Query 2: Multiple CTEs + CROSS JOIN + WHERE running_total <= total * 0.8
+        QueryResult r2 = engine.execute("WITH sales_cte AS ( " +
+                "    SELECT product_id, SUM(quantity * price) AS revenue " +
+                "    FROM Sales " +
+                "    GROUP BY product_id " +
+                "), " +
+                "total_revenue AS ( " +
+                "    SELECT SUM(revenue) AS total " +
+                "    FROM sales_cte " +
+                "), " +
+                "running_revenue AS ( " +
+                "    SELECT " +
+                "        s.product_id, " +
+                "        s.revenue, " +
+                "        t.total, " +
+                "        SUM(s.revenue) OVER ( " +
+                "            ORDER BY s.revenue DESC " +
+                "            ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW " +
+                "        ) AS running_total " +
+                "    FROM sales_cte s " +
+                "    CROSS JOIN total_revenue t " +
+                ") " +
+                "SELECT product_id, revenue, running_total " +
+                "FROM running_revenue " +
+                "WHERE running_total <= total * 0.8;");
+
+        assertTrue("r2 failed: " + r2.message, r2.success);
+        assertEquals(2, r2.rows.size());
+        assertEquals(1, Integer.parseInt(r2.rows.get(0).get("product_id").toString()));
+        assertEquals(3, Integer.parseInt(r2.rows.get(1).get("product_id").toString()));
+
+        engine.execute("DROP DATABASE test_pareto_db;");
+    }
+
+    @Test
+    public void testWindowFunctionPartitionBy() {
+        engine.execute("CREATE DATABASE test_window_partition_db;");
+        engine.execute("USE test_window_partition_db;");
+        engine.execute("CREATE TABLE Orders (customer_id INT, order_date DATE);");
+        
+        // Insert test data
+        engine.execute("INSERT INTO Orders VALUES " +
+                "(1, '2023-01-01'), " +
+                "(1, '2023-01-19'), " + // 18 days gap for customer 1
+                "(2, '2023-01-05'), " +
+                "(2, '2023-03-22'), " + // 76 days gap for customer 2
+                "(4, '2023-02-10'), " +
+                "(4, '2023-03-12');");   // 30 days gap for customer 4
+
+        QueryResult r = engine.execute("WITH cte AS ( " +
+                "    SELECT customer_id, order_date, " +
+                "           LAG(order_date) OVER (PARTITION BY customer_id ORDER BY order_date) AS prev_date " +
+                "    FROM Orders " +
+                ") " +
+                "SELECT customer_id, " +
+                "       AVG(DATEDIFF(order_date, prev_date)) AS avg_gap_days " +
+                "FROM cte " +
+                "WHERE prev_date IS NOT NULL " +
+                "GROUP BY customer_id " +
+                "ORDER BY customer_id;");
+
+        assertTrue("Query failed: " + r.message, r.success);
+        assertEquals(3, r.rows.size());
+
+        // Verify customer 1 avg gap
+        assertEquals(1L, ((Number) r.rows.get(0).get("customer_id")).longValue());
+        assertEquals(18.0, ((Number) r.rows.get(0).get("avg_gap_days")).doubleValue(), 0.001);
+
+        // Verify customer 2 avg gap
+        assertEquals(2L, ((Number) r.rows.get(1).get("customer_id")).longValue());
+        assertEquals(76.0, ((Number) r.rows.get(1).get("avg_gap_days")).doubleValue(), 0.001);
+
+        // Verify customer 4 avg gap
+        assertEquals(4L, ((Number) r.rows.get(2).get("customer_id")).longValue());
+        assertEquals(30.0, ((Number) r.rows.get(2).get("avg_gap_days")).doubleValue(), 0.001);
+
+        engine.execute("DROP DATABASE test_window_partition_db;");
+    }
+
+    @Test
+    public void testWindowFunctionInArithmetic() {
+        engine.execute("CREATE DATABASE test_window_arithmetic_db;");
+        engine.execute("USE test_window_arithmetic_db;");
+        engine.execute("CREATE TABLE Orders (order_date DATE, total_amount DOUBLE);");
+        
+        // Insert test data
+        engine.execute("INSERT INTO Orders VALUES " +
+                "('2022-05-01', 50.0), " +
+                "('2022-08-15', 100.0), " + // 2022 total: 150.0
+                "('2023-01-10', 2000.0), " +
+                "('2023-06-20', 4200.0);"); // 2023 total: 6200.0
+
+        QueryResult r = engine.execute("SELECT " +
+                "    YEAR(order_date) AS year, " +
+                "    SUM(total_amount) AS revenue, " +
+                "    SUM(total_amount) - LAG(SUM(total_amount)) OVER (ORDER BY YEAR(order_date)) AS yoy_growth " +
+                "FROM Orders " +
+                "GROUP BY YEAR(order_date);");
+
+        assertTrue("Query failed: " + r.message, r.success);
+        assertEquals(2, r.rows.size());
+
+        // Verify 2022
+        assertEquals(2022L, ((Number) r.rows.get(0).get("year")).longValue());
+        assertEquals(150.0, ((Number) r.rows.get(0).get("revenue")).doubleValue(), 0.001);
+        assertNull("yoy_growth for first row should be NULL", r.rows.get(0).get("yoy_growth"));
+
+        // Verify 2023
+        assertEquals(2023L, ((Number) r.rows.get(1).get("year")).longValue());
+        assertEquals(6200.0, ((Number) r.rows.get(1).get("revenue")).doubleValue(), 0.001);
+        assertEquals(6050.0, ((Number) r.rows.get(1).get("yoy_growth")).doubleValue(), 0.001);
+
+        engine.execute("DROP DATABASE test_window_arithmetic_db;");
+    }
 }
 

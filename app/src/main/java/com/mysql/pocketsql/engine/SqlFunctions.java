@@ -58,12 +58,39 @@ public class SqlFunctions {
         private final String columnName;
         public ColumnExpression(String columnName) { this.columnName = columnName; }
         @Override public Object evaluate(Map<String, Object> row, List<Map<String, Object>> groupRows, DatabaseEngine engine) {
-            if (row == null) return null;
-            return DatabaseEngine.getRowValue(row, columnName);
+            if (row == null) return columnName;
+            Object val = DatabaseEngine.getRowValue(row, columnName);
+            if (val == null && !rowHasColumn(row, columnName)) {
+                return columnName;
+            }
+            return val;
+        }
+
+        private boolean rowHasColumn(Map<String, Object> row, String col) {
+            if (row == null || col == null) return false;
+            if (row.containsKey(col)) return true;
+            for (String key : row.keySet()) {
+                if (key.equalsIgnoreCase(col)) return true;
+                if (key.contains(".")) {
+                    String suffix = key.substring(key.indexOf('.') + 1);
+                    if (suffix.equalsIgnoreCase(col)) return true;
+                }
+            }
+            return false;
         }
         @Override public boolean hasAggregate() { return false; }
         @Override public boolean hasWindowFunction() { return false; }
-        @Override public void collectColumns(List<String> columns) { columns.add(columnName); }
+        @Override public void collectColumns(List<String> columns) {
+            // DISTINCT, ALL, *, and datepart keywords are SQL modifiers/keywords, not real column references
+            if (!"DISTINCT".equalsIgnoreCase(columnName) && !"ALL".equalsIgnoreCase(columnName) && !"*".equals(columnName)
+                && !"WEEKDAY".equalsIgnoreCase(columnName) && !"YEAR".equalsIgnoreCase(columnName)
+                && !"MONTH".equalsIgnoreCase(columnName) && !"DAY".equalsIgnoreCase(columnName)
+                && !"HOUR".equalsIgnoreCase(columnName) && !"MINUTE".equalsIgnoreCase(columnName)
+                && !"SECOND".equalsIgnoreCase(columnName) && !"QUARTER".equalsIgnoreCase(columnName)
+                && !"WEEK".equalsIgnoreCase(columnName) && !"DAYOFYEAR".equalsIgnoreCase(columnName)) {
+                columns.add(columnName);
+            }
+        }
         @Override public String toString() { return columnName; }
     }
 
@@ -201,9 +228,13 @@ public class SqlFunctions {
             this.fullExprString = fullExprString;
         }
 
-        @Override public Object evaluate(Map<String, Object> row, List<Map<String, Object>> groupRows, DatabaseEngine engine) {
-            if (row == null) return null;
-            return row.get(fullExprString);
+        @Override
+        public Object evaluate(Map<String, Object> row, List<Map<String, Object>> groupRows, DatabaseEngine engine) {
+            System.out.println("DEBUG WINDOW EVAL: looking for '" + fullExprString + "' in keys=" + (row != null ? row.keySet() : "null"));
+            if (row != null && row.containsKey(fullExprString)) {
+                return row.get(fullExprString);
+            }
+            return null;
         }
 
         @Override public boolean hasAggregate() { return false; }
@@ -214,6 +245,43 @@ public class SqlFunctions {
             }
         }
         @Override public String toString() { return fullExprString; }
+    }
+
+    public static class SubqueryExpression implements Expression {
+        private final String query;
+        public SubqueryExpression(String query) {
+            this.query = query;
+        }
+        @Override public Object evaluate(Map<String, Object> row, List<Map<String, Object>> groupRows, DatabaseEngine engine) {
+            if (engine == null) return null;
+            try {
+                String boundQuery = query;
+                if (row != null) {
+                    for (Map.Entry<String, Object> entry : row.entrySet()) {
+                        String key = entry.getKey();
+                        Object val = entry.getValue();
+                        if (key != null && val != null && boundQuery.contains(key)) {
+                            String replacement = (val instanceof Number) ? val.toString() : "'" + val.toString().replace("'", "\\'") + "'";
+                            boundQuery = boundQuery.replaceAll("\\b" + java.util.regex.Pattern.quote(key) + "\\b", replacement);
+                        }
+                    }
+                }
+                QueryResult qres = engine.execute(boundQuery);
+                if (qres.success && qres.rows != null && !qres.rows.isEmpty()) {
+                    Map<String, Object> firstRow = qres.rows.get(0);
+                    if (firstRow != null && !firstRow.isEmpty()) {
+                        return firstRow.values().iterator().next();
+                    }
+                }
+                return null;
+            } catch (Exception e) {
+                return null;
+            }
+        }
+        @Override public boolean hasAggregate() { return false; }
+        @Override public boolean hasWindowFunction() { return false; }
+        @Override public void collectColumns(List<String> columns) {}
+        @Override public String toString() { return "(" + query + ")"; }
     }
 
     public static class FunctionExpression implements Expression {
@@ -249,6 +317,10 @@ public class SqlFunctions {
         }
 
         @Override public Object evaluate(Map<String, Object> row, List<Map<String, Object>> groupRows, DatabaseEngine engine) {
+            String str = this.toString();
+            if (row != null && row.containsKey(str)) {
+                return row.get(str);
+            }
             if ("COUNT".equals(name)) {
                 if (groupRows == null) return 1L;
                 if (args.isEmpty()) return (long) groupRows.size();
@@ -357,19 +429,95 @@ public class SqlFunctions {
     }
 
     public static Object evaluate(String exprStr, Map<String, Object> row, DatabaseEngine engine) {
+        if (exprStr == null) return null;
         if (row != null && row.containsKey(exprStr)) {
             return row.get(exprStr);
+        }
+        String trimmed = exprStr.trim();
+        if (trimmed.startsWith("(") && trimmed.endsWith(")")) {
+            trimmed = trimmed.substring(1, trimmed.length() - 1).trim();
+        }
+        if (trimmed.toUpperCase().startsWith("SELECT ")) {
+            if (engine != null) {
+                try {
+                    QueryResult qres = engine.execute(trimmed);
+                    if (qres.success && qres.rows != null && !qres.rows.isEmpty()) {
+                        Map<String, Object> firstRow = qres.rows.get(0);
+                        if (firstRow != null && !firstRow.isEmpty()) {
+                            return firstRow.values().iterator().next();
+                        }
+                    }
+                    return null;
+                } catch (Exception e) {
+                    return null;
+                }
+            }
+            return null;
         }
         Expression expr = parse(exprStr);
         return expr.evaluate(row, null, engine);
     }
 
     public static Object evaluate(String exprStr, Map<String, Object> row, List<Map<String, Object>> groupRows, DatabaseEngine engine) {
+        if (exprStr == null) return null;
         if (row != null && row.containsKey(exprStr)) {
             return row.get(exprStr);
         }
+        String trimmed = exprStr.trim();
+        if (trimmed.startsWith("(") && trimmed.endsWith(")")) {
+            trimmed = trimmed.substring(1, trimmed.length() - 1).trim();
+        }
+        if (trimmed.toUpperCase().startsWith("SELECT ")) {
+            if (engine != null) {
+                try {
+                    QueryResult qres = engine.execute(trimmed);
+                    if (qres.success && qres.rows != null && !qres.rows.isEmpty()) {
+                        Map<String, Object> firstRow = qres.rows.get(0);
+                        if (firstRow != null && !firstRow.isEmpty()) {
+                            return firstRow.values().iterator().next();
+                        }
+                    }
+                    return null;
+                } catch (Exception e) {
+                    return null;
+                }
+            }
+            return null;
+        }
         Expression expr = parse(exprStr);
         return expr.evaluate(row, groupRows, engine);
+    }
+
+    public static List<Object> evaluateList(String exprStr, Map<String, Object> row, DatabaseEngine engine) {
+        if (exprStr == null) return java.util.Collections.emptyList();
+        String trimmed = exprStr.trim();
+        if (trimmed.startsWith("(") && trimmed.endsWith(")")) {
+            trimmed = trimmed.substring(1, trimmed.length() - 1).trim();
+        }
+        if (trimmed.toUpperCase().startsWith("SELECT ")) {
+            if (engine != null) {
+                try {
+                    QueryResult qres = engine.execute(trimmed);
+                    if (qres.success && qres.rows != null) {
+                        List<Object> list = new ArrayList<>();
+                        for (Map<String, Object> r : qres.rows) {
+                            if (r != null && !r.isEmpty()) {
+                                list.add(r.values().iterator().next());
+                            }
+                        }
+                        return list;
+                    }
+                } catch (Exception e) {
+                    return java.util.Collections.emptyList();
+                }
+            }
+            return java.util.Collections.emptyList();
+        }
+        Object scalar = evaluate(exprStr, row, engine);
+        if (scalar != null) {
+            return java.util.Collections.singletonList(scalar);
+        }
+        return java.util.Collections.emptyList();
     }
 
     /** @deprecated Use SqlOperator.isTruthy(val) instead */
@@ -390,7 +538,7 @@ public class SqlFunctions {
         return SqlOperator.compare(lVal, op, rVal);
     }
 
-    private static Object evaluateScalarFunction(String name, List<Object> argVals, DatabaseEngine engine) {
+    public static Object evaluateScalarFunction(String name, List<Object> argVals, DatabaseEngine engine) {
         if (engine != null && engine.hasCustomFunction(name)) {
             try {
                 return engine.executeCustomFunction(name, argVals);
@@ -659,6 +807,78 @@ public class SqlFunctions {
             LocalDateTime dt = parseDateTime(argVals.get(0));
             return dt == null ? null : (long) dt.getDayOfMonth();
         }
+        if ("DAYNAME".equals(name)) {
+            if (argVals.isEmpty() || argVals.get(0) == null) return null;
+            LocalDateTime dt = parseDateTime(argVals.get(0));
+            return dt == null ? null : dt.getDayOfWeek().getDisplayName(java.time.format.TextStyle.FULL, java.util.Locale.ENGLISH);
+        }
+        if ("MONTHNAME".equals(name)) {
+            if (argVals.isEmpty() || argVals.get(0) == null) return null;
+            LocalDateTime dt = parseDateTime(argVals.get(0));
+            return dt == null ? null : dt.getMonth().getDisplayName(java.time.format.TextStyle.FULL, java.util.Locale.ENGLISH);
+        }
+        if ("DATENAME".equals(name)) {
+            if (argVals.size() < 2) return null;
+            Object partObj = argVals.get(0);
+            Object dateObj = argVals.get(1);
+            if (partObj == null || dateObj == null) return null;
+            LocalDateTime dt = parseDateTime(dateObj);
+            if (dt == null) return null;
+
+            String part = partObj.toString().toUpperCase().trim();
+            switch (part) {
+                case "WEEKDAY":
+                case "DW":
+                case "W":
+                    return dt.getDayOfWeek().getDisplayName(java.time.format.TextStyle.FULL, java.util.Locale.ENGLISH);
+                case "MONTH":
+                case "MM":
+                case "M":
+                    return dt.getMonth().getDisplayName(java.time.format.TextStyle.FULL, java.util.Locale.ENGLISH);
+                case "YEAR":
+                case "YY":
+                case "YYYY":
+                    return String.valueOf(dt.getYear());
+                case "DAY":
+                case "DD":
+                case "D":
+                case "DAYOFMONTH":
+                    return String.valueOf(dt.getDayOfMonth());
+                case "HOUR":
+                case "HH":
+                    return String.valueOf(dt.getHour());
+                case "MINUTE":
+                case "MI":
+                case "N":
+                    return String.valueOf(dt.getMinute());
+                case "SECOND":
+                case "SS":
+                case "S":
+                    return String.valueOf(dt.getSecond());
+                case "QUARTER":
+                case "QQ":
+                case "Q":
+                    return String.valueOf((dt.getMonthValue() - 1) / 3 + 1);
+                case "DAYOFYEAR":
+                case "DY":
+                    return String.valueOf(dt.getDayOfYear());
+                default:
+                    return dt.toString();
+            }
+        }
+        if ("DAYOFWEEK".equals(name)) {
+            if (argVals.isEmpty() || argVals.get(0) == null) return null;
+            LocalDateTime dt = parseDateTime(argVals.get(0));
+            if (dt == null) return null;
+            int val = dt.getDayOfWeek().getValue();
+            return val == 7 ? 1L : (long) (val + 1);
+        }
+        if ("WEEKDAY".equals(name)) {
+            if (argVals.isEmpty() || argVals.get(0) == null) return null;
+            LocalDateTime dt = parseDateTime(argVals.get(0));
+            if (dt == null) return null;
+            return (long) (dt.getDayOfWeek().getValue() - 1);
+        }
         if ("HOUR".equals(name)) {
             if (argVals.isEmpty() || argVals.get(0) == null) return null;
             LocalDateTime dt = parseDateTime(argVals.get(0));
@@ -729,6 +949,66 @@ public class SqlFunctions {
                 case "YEAR": return ChronoUnit.YEARS.between(dt1, dt2);
                 default: return null;
             }
+        }
+        if ("DATE_FORMAT".equals(name)) {
+            if (argVals.size() < 2 || argVals.get(0) == null || argVals.get(1) == null) return null;
+            LocalDateTime dt = parseDateTime(argVals.get(0));
+            if (dt == null) return null;
+            return formatDateMySQL(dt, argVals.get(1).toString());
+        }
+        if ("FORMAT".equals(name)) {
+            if (argVals.isEmpty() || argVals.get(0) == null) return null;
+            Object arg0 = argVals.get(0);
+            Object arg1 = argVals.size() > 1 ? argVals.get(1) : null;
+            
+            // Check if arg1 is a date format pattern (e.g. '%Y-%m-%d' or 'yyyy-MM-dd')
+            if (arg1 != null && arg1.toString().contains("%")) {
+                LocalDateTime dt = parseDateTime(arg0);
+                if (dt != null) {
+                    return formatDateMySQL(dt, arg1.toString());
+                }
+            }
+            if (arg1 != null && (arg1.toString().contains("y") || arg1.toString().contains("M") || arg1.toString().contains("d")) && !arg1.toString().matches("^-?\\d+$")) {
+                LocalDateTime dt = parseDateTime(arg0);
+                if (dt != null) {
+                    try {
+                        return dt.format(DateTimeFormatter.ofPattern(arg1.toString()));
+                    } catch (Exception ignored) {}
+                }
+            }
+
+            // Numeric FORMAT(X, D [, locale])
+            double val = parseDouble(arg0);
+            int decimals = 0;
+            if (arg1 != null) {
+                try {
+                    decimals = ((Number) arg1).intValue();
+                } catch (Exception e) {
+                    try {
+                        decimals = Integer.parseInt(arg1.toString());
+                    } catch (Exception ignored) {}
+                }
+            }
+            java.util.Locale locale = java.util.Locale.US;
+            if (argVals.size() > 2 && argVals.get(2) != null) {
+                String locStr = argVals.get(2).toString().trim().replace('-', '_');
+                String[] parts = locStr.split("_");
+                if (parts.length >= 2) {
+                    locale = new java.util.Locale(parts[0], parts[1]);
+                } else if (parts.length == 1 && !parts[0].isEmpty()) {
+                    locale = new java.util.Locale(parts[0]);
+                }
+            }
+
+            java.text.NumberFormat nf = java.text.NumberFormat.getNumberInstance(locale);
+            if (decimals <= 0) {
+                nf.setMaximumFractionDigits(0);
+                nf.setMinimumFractionDigits(0);
+            } else {
+                nf.setMaximumFractionDigits(decimals);
+                nf.setMinimumFractionDigits(decimals);
+            }
+            return nf.format(val);
         }
 
         // Conditional functions
@@ -907,7 +1187,7 @@ public class SqlFunctions {
         throw new RuntimeException("FUNCTION " + name + " does not exist");
     }
 
-    private static LocalDateTime parseDateTime(Object obj) {
+    public static LocalDateTime parseDateTime(Object obj) {
         if (obj == null) return null;
         String s = obj.toString().trim().replace('T', ' ');
         if (s.isEmpty()) return null;
@@ -927,6 +1207,78 @@ public class SqlFunctions {
                 return null;
             }
         }
+    }
+
+    private static String formatDateMySQL(LocalDateTime dt, String fmtPattern) {
+        if (dt == null || fmtPattern == null) return null;
+        StringBuilder sb = new StringBuilder();
+        int len = fmtPattern.length();
+        for (int i = 0; i < len; i++) {
+            char c = fmtPattern.charAt(i);
+            if (c == '%' && i + 1 < len) {
+                i++;
+                char spec = fmtPattern.charAt(i);
+                switch (spec) {
+                    case 'Y': sb.append(String.format(java.util.Locale.US, "%04d", dt.getYear())); break;
+                    case 'y': sb.append(String.format(java.util.Locale.US, "%02d", dt.getYear() % 100)); break;
+                    case 'm': sb.append(String.format(java.util.Locale.US, "%02d", dt.getMonthValue())); break;
+                    case 'c': sb.append(dt.getMonthValue()); break;
+                    case 'M': sb.append(dt.getMonth().getDisplayName(java.time.format.TextStyle.FULL, java.util.Locale.US)); break;
+                    case 'b': sb.append(dt.getMonth().getDisplayName(java.time.format.TextStyle.SHORT, java.util.Locale.US)); break;
+                    case 'd': sb.append(String.format(java.util.Locale.US, "%02d", dt.getDayOfMonth())); break;
+                    case 'e': sb.append(dt.getDayOfMonth()); break;
+                    case 'D': {
+                        int day = dt.getDayOfMonth();
+                        String suffix = "th";
+                        if (day % 100 < 11 || day % 100 > 13) {
+                            switch (day % 10) {
+                                case 1: suffix = "st"; break;
+                                case 2: suffix = "nd"; break;
+                                case 3: suffix = "rd"; break;
+                            }
+                        }
+                        sb.append(day).append(suffix);
+                        break;
+                    }
+                    case 'H': sb.append(String.format(java.util.Locale.US, "%02d", dt.getHour())); break;
+                    case 'h':
+                    case 'I': {
+                        int h12 = dt.getHour() % 12;
+                        if (h12 == 0) h12 = 12;
+                        sb.append(String.format(java.util.Locale.US, "%02d", h12));
+                        break;
+                    }
+                    case 'k': sb.append(dt.getHour()); break;
+                    case 'l': {
+                        int h12 = dt.getHour() % 12;
+                        if (h12 == 0) h12 = 12;
+                        sb.append(h12);
+                        break;
+                    }
+                    case 'i': sb.append(String.format(java.util.Locale.US, "%02d", dt.getMinute())); break;
+                    case 's':
+                    case 'S': sb.append(String.format(java.util.Locale.US, "%02d", dt.getSecond())); break;
+                    case 'p': sb.append(dt.getHour() >= 12 ? "PM" : "AM"); break;
+                    case 'r': {
+                        int h12 = dt.getHour() % 12;
+                        if (h12 == 0) h12 = 12;
+                        sb.append(String.format(java.util.Locale.US, "%02d:%02d:%02d %s", h12, dt.getMinute(), dt.getSecond(), dt.getHour() >= 12 ? "PM" : "AM"));
+                        break;
+                    }
+                    case 'T': sb.append(String.format(java.util.Locale.US, "%02d:%02d:%02d", dt.getHour(), dt.getMinute(), dt.getSecond())); break;
+                    case 'W': sb.append(dt.getDayOfWeek().getDisplayName(java.time.format.TextStyle.FULL, java.util.Locale.US)); break;
+                    case 'a': sb.append(dt.getDayOfWeek().getDisplayName(java.time.format.TextStyle.SHORT, java.util.Locale.US)); break;
+                    case 'w': sb.append(dt.getDayOfWeek().getValue() % 7); break;
+                    case 'j': sb.append(String.format(java.util.Locale.US, "%03d", dt.getDayOfYear())); break;
+                    case 'f': sb.append("000000"); break;
+                    case '%': sb.append('%'); break;
+                    default: sb.append('%').append(spec); break;
+                }
+            } else {
+                sb.append(c);
+            }
+        }
+        return sb.toString();
     }
 
     private static Object extractJsonPath(String jsonStr, String path) {
@@ -1299,7 +1651,36 @@ public class SqlFunctions {
             if (t.type == SqlToken.Type.KEYWORD && "CASE".equalsIgnoreCase(t.value)) {
                 return parseCaseExpression();
             }
+            if ((t.type == SqlToken.Type.KEYWORD || t.type == SqlToken.Type.IDENTIFIER) && "INTERVAL".equalsIgnoreCase(t.value)) {
+                consume(); // INTERVAL
+                SqlToken amtTok = consume();
+                SqlToken unitTok = consume();
+                return new LiteralExpression("INTERVAL " + amtTok.value + " " + unitTok.value);
+            }
             if (matchSymbol("(")) {
+                if (peek().type == SqlToken.Type.KEYWORD && "SELECT".equalsIgnoreCase(peek().value)) {
+                    StringBuilder subqSb = new StringBuilder();
+                    int depth = 1;
+                    while (pos < tokens.size() && depth > 0) {
+                        SqlToken tok = consume();
+                        if (tok.type == SqlToken.Type.SYMBOL) {
+                            if ("(".equals(tok.value)) depth++;
+                            else if (")".equals(tok.value)) {
+                                depth--;
+                                if (depth == 0) break;
+                            }
+                        }
+                        if (subqSb.length() > 0 && tok.type != SqlToken.Type.SYMBOL && subqSb.charAt(subqSb.length() - 1) != '(' && subqSb.charAt(subqSb.length() - 1) != '.') {
+                            subqSb.append(" ");
+                        }
+                        if (tok.type == SqlToken.Type.STRING) {
+                            subqSb.append("'").append(tok.value.replace("'", "\\'")).append("'");
+                        } else {
+                            subqSb.append(tok.value);
+                        }
+                    }
+                    return new SubqueryExpression(subqSb.toString());
+                }
                 Expression expr = parseExpression();
                 matchSymbol(")");
                 return expr;
@@ -1321,7 +1702,7 @@ public class SqlFunctions {
                             args.add(new LiteralExpression("*"));
                         } else {
                             do {
-                                if (matchKeyword("INTERVAL")) {
+                                if (matchKeyword("INTERVAL") || (peek().type == SqlToken.Type.IDENTIFIER && "INTERVAL".equalsIgnoreCase(peek().value) && consume() != null)) {
                                     Expression amount = parseExpression();
                                     SqlToken unitToken = consume();
                                     args.add(new LiteralExpression("INTERVAL " + amount.toString() + " " + unitToken.value));

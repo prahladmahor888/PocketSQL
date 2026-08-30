@@ -77,6 +77,25 @@ public interface Command {
         public String collation = null;
         public String definition = null;
 
+        public Command.Select selectQuery = null;
+
+        public CreateTable(String tableName, Command.Select selectQuery, boolean ifNotExists) {
+            this.tableName = tableName;
+            this.columnNames = new java.util.ArrayList<>();
+            this.columnTypes = new java.util.ArrayList<>();
+            this.columnDefaults = new java.util.HashMap<>();
+            this.columnOnUpdates = new java.util.HashMap<>();
+            this.columnNullables = new java.util.HashMap<>();
+            this.columnKeys = new java.util.HashMap<>();
+            this.columnExtras = new java.util.HashMap<>();
+            this.checks = new java.util.ArrayList<>();
+            this.foreignKeys = new java.util.HashMap<>();
+            this.primaryKey = new java.util.ArrayList<>();
+            this.uniques = new java.util.ArrayList<>();
+            this.ifNotExists = ifNotExists;
+            this.selectQuery = selectQuery;
+        }
+
         public CreateTable(String tableName, List<String> columnNames, List<String> columnTypes,
                            Map<String, String> columnDefaults, Map<String, String> columnOnUpdates,
                            Map<String, Boolean> columnNullables, Map<String, String> columnKeys,
@@ -100,6 +119,9 @@ public interface Command {
 
         @Override
         public QueryResult execute(DatabaseEngine engine) throws Exception {
+            if (selectQuery != null) {
+                return engine.createTableAsSelect(tableName, selectQuery, ifNotExists);
+            }
             return engine.createTable(tableName, columnNames, columnTypes,
                                       columnDefaults, columnOnUpdates, columnNullables,
                                       columnKeys, columnExtras, checks, foreignKeys,
@@ -129,16 +151,24 @@ public interface Command {
 
     class DropTable implements Command {
         public final String tableName;
+        public final List<String> tableNames;
         public final boolean ifExists;
 
         public DropTable(String tableName, boolean ifExists) {
             this.tableName = tableName;
+            this.tableNames = java.util.Collections.singletonList(tableName);
+            this.ifExists = ifExists;
+        }
+
+        public DropTable(List<String> tableNames, boolean ifExists) {
+            this.tableNames = tableNames;
+            this.tableName = tableNames != null && !tableNames.isEmpty() ? tableNames.get(0) : "";
             this.ifExists = ifExists;
         }
 
         @Override
         public QueryResult execute(DatabaseEngine engine) throws Exception {
-            return engine.dropTable(tableName, ifExists);
+            return engine.dropTables(tableNames, ifExists);
         }
     }
 
@@ -148,14 +178,26 @@ public interface Command {
         public final List<List<Object>> valuesList;
         public java.util.Map<String, String> updateAssignments = null;
 
+        public Command.Select selectQuery = null;
+
         public Insert(String tableName, List<String> columnNames, List<List<Object>> valuesList) {
             this.tableName = tableName;
             this.columnNames = columnNames;
             this.valuesList = valuesList;
         }
 
+        public Insert(String tableName, List<String> columnNames, Command.Select selectQuery) {
+            this.tableName = tableName;
+            this.columnNames = columnNames;
+            this.valuesList = null;
+            this.selectQuery = selectQuery;
+        }
+
         @Override
         public QueryResult execute(DatabaseEngine engine) throws Exception {
+            if (selectQuery != null) {
+                return engine.insertIntoSelect(tableName, columnNames, selectQuery);
+            }
             return engine.insertInto(tableName, columnNames, valuesList, updateAssignments);
         }
     }
@@ -178,6 +220,8 @@ public interface Command {
 
         public final Map<String, String> tableAliases;
         public final List<Clause.OrderBy> orderBySpecs;
+        public final Command.Select derivedTableQuery;
+        public final String derivedTableAlias;
 
         public Select(List<String> projection, String tableName, Clause.Where where, 
                       String orderByColumn, boolean orderAsc, Integer limit,
@@ -185,7 +229,7 @@ public interface Command {
                       Clause.GroupBy groupBy, Clause.Having having, Clause.Union union) {
             this(projection, tableName, where,
                  orderByColumn == null ? null : java.util.Arrays.asList(new Clause.OrderBy(orderByColumn, orderAsc)),
-                 limit, distinct, aliases, joins, groupBy, having, union, null);
+                 limit, distinct, aliases, joins, groupBy, having, union, null, null, null);
         }
 
         public Select(List<String> projection, String tableName, Clause.Where where, 
@@ -195,7 +239,7 @@ public interface Command {
                       Map<String, String> tableAliases) {
             this(projection, tableName, where,
                  orderByColumn == null ? null : java.util.Arrays.asList(new Clause.OrderBy(orderByColumn, orderAsc)),
-                 limit, distinct, aliases, joins, groupBy, having, union, tableAliases);
+                 limit, distinct, aliases, joins, groupBy, having, union, tableAliases, null, null);
         }
 
         public Select(List<String> projection, String tableName, Clause.Where where, 
@@ -203,6 +247,14 @@ public interface Command {
                       boolean distinct, Map<String, String> aliases, List<Clause.Join> joins,
                       Clause.GroupBy groupBy, Clause.Having having, Clause.Union union,
                       Map<String, String> tableAliases) {
+            this(projection, tableName, where, orderBySpecs, limit, distinct, aliases, joins, groupBy, having, union, tableAliases, null, null);
+        }
+
+        public Select(List<String> projection, String tableName, Clause.Where where, 
+                      List<Clause.OrderBy> orderBySpecs, Integer limit,
+                      boolean distinct, Map<String, String> aliases, List<Clause.Join> joins,
+                      Clause.GroupBy groupBy, Clause.Having having, Clause.Union union,
+                      Map<String, String> tableAliases, Command.Select derivedTableQuery, String derivedTableAlias) {
             this.projection = projection;
             this.tableName = tableName;
             this.where = where;
@@ -222,6 +274,8 @@ public interface Command {
             this.having = having;
             this.union = union;
             this.tableAliases = tableAliases;
+            this.derivedTableQuery = derivedTableQuery;
+            this.derivedTableAlias = derivedTableAlias;
         }
 
         @Override
@@ -643,6 +697,14 @@ public interface Command {
             this.dropOnUpdate = dropOnUpdate;
         }
 
+        public long autoIncrementValue = 1;
+
+        public static AlterTable createAutoIncrement(String tableName, long value) {
+            AlterTable cmd = new AlterTable(tableName, "AUTO_INCREMENT");
+            cmd.autoIncrementValue = value;
+            return cmd;
+        }
+
         // 11. Factory creator for engine/charset
         public static AlterTable createEngineOrCharSet(String tableName, String operation, String value) {
             AlterTable cmd = new AlterTable(tableName, operation);
@@ -657,6 +719,38 @@ public interface Command {
         @Override
         public QueryResult execute(DatabaseEngine engine) throws Exception {
             return engine.alterTable(this);
+        }
+    }
+
+    class AlterTableBatch implements Command {
+        public final List<Command> operations;
+
+        public AlterTableBatch(List<Command> operations) {
+            this.operations = operations;
+        }
+
+        @Override
+        public QueryResult execute(DatabaseEngine engine) throws Exception {
+            QueryResult lastResult = null;
+            for (Command op : operations) {
+                lastResult = op.execute(engine);
+            }
+            return lastResult != null ? lastResult : QueryResult.createSuccess("Table altered successfully", 0, 0);
+        }
+    }
+
+    class With implements Command {
+        public final Map<String, Command.Select> ctes;
+        public final Command mainQuery;
+
+        public With(Map<String, Command.Select> ctes, Command mainQuery) {
+            this.ctes = ctes;
+            this.mainQuery = mainQuery;
+        }
+
+        @Override
+        public QueryResult execute(DatabaseEngine engine) throws Exception {
+            return engine.executeWith(ctes, mainQuery);
         }
     }
 
@@ -787,16 +881,24 @@ public interface Command {
 
     class DropView implements Command {
         public final String viewName;
+        public final List<String> viewNames;
         public final boolean ifExists;
 
         public DropView(String viewName, boolean ifExists) {
             this.viewName = viewName;
+            this.viewNames = java.util.Collections.singletonList(viewName);
+            this.ifExists = ifExists;
+        }
+
+        public DropView(List<String> viewNames, boolean ifExists) {
+            this.viewNames = viewNames;
+            this.viewName = viewNames != null && !viewNames.isEmpty() ? viewNames.get(0) : "";
             this.ifExists = ifExists;
         }
 
         @Override
         public QueryResult execute(DatabaseEngine engine) throws Exception {
-            return engine.dropView(viewName, ifExists);
+            return engine.dropViews(viewNames, ifExists);
         }
     }
 

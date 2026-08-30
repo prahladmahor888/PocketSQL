@@ -1,6 +1,7 @@
 package com.mysql.pocketsql.engine;
 
 import java.util.List;
+import java.util.ArrayList;
 
 /**
  * SqlOperator — Centralized SQL Operator Evaluation Engine
@@ -81,6 +82,16 @@ public class SqlOperator {
 
         if (type == Type.ARITHMETIC) {
             if (left == null || right == null) return null;
+            if ("-".equals(op) || "+".equals(op)) {
+                String rStr = right.toString().trim();
+                if (rStr.toUpperCase().startsWith("INTERVAL ") || rStr.toUpperCase().contains(" DAY") || rStr.toUpperCase().contains(" MONTH") || rStr.toUpperCase().contains(" YEAR")) {
+                    String funcName = "-".equals(op) ? "DATE_SUB" : "DATE_ADD";
+                    List<Object> args = new ArrayList<>();
+                    args.add(left);
+                    args.add(rStr);
+                    return SqlFunctions.evaluateScalarFunction(funcName, args, null);
+                }
+            }
             double l = toDouble(left);
             double r = toDouble(right);
             switch (op) {

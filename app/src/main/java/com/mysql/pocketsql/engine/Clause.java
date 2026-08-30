@@ -97,6 +97,13 @@ public class Clause {
             }
 
             Object rowVal = DatabaseEngine.getRowValue(row, column);
+            if (rowVal == null && column != null && !row.containsKey(column)) {
+                if (column.contains("(") || column.contains("+") || column.contains("-") || column.contains("*") || column.contains("/")) {
+                    try {
+                        rowVal = SqlFunctions.evaluate(column, row, engine);
+                    } catch (Exception ignored) {}
+                }
+            }
 
             // Handle IS NULL / IS NOT NULL
             if ("IS NULL".equals(operator)) {
@@ -111,7 +118,7 @@ public class Clause {
                 String valCol = (String) value;
                 if (valCol.startsWith("@")) {
                     comparisonValue = engine != null ? engine.getUserVariable(valCol) : null;
-                } else if (valCol.contains("(")) {
+                } else if (valCol.contains("(") || valCol.contains("+") || valCol.contains("-") || valCol.contains("*") || valCol.contains("/")) {
                     comparisonValue = SqlFunctions.evaluate(valCol, row, engine);
                 } else {
                     comparisonValue = DatabaseEngine.getRowValue(row, valCol);
@@ -126,19 +133,29 @@ public class Clause {
                 }
             }
 
-            // Handle IN operator
-            if ("IN".equals(operator)) {
-                return SqlOperator.evaluateIn(rowVal, listValues, collation);
+            // Handle IN and NOT IN operator
+            if ("IN".equals(operator) || "NOT IN".equals(operator)) {
+                List<Object> targetList = listValues;
+                if (isValueColumn && value instanceof String) {
+                    String valStr = (String) value;
+                    if (valStr.toUpperCase().contains("SELECT ")) {
+                        targetList = SqlFunctions.evaluateList(valStr, row, engine);
+                    }
+                }
+                boolean inResult = SqlOperator.evaluateIn(rowVal, targetList, collation);
+                return "NOT IN".equals(operator) ? !inResult : inResult;
             }
 
-            // Handle BETWEEN operator
-            if ("BETWEEN".equals(operator)) {
-                return SqlOperator.evaluateBetween(rowVal, lowValue, highValue, collation);
+            // Handle BETWEEN and NOT BETWEEN operator
+            if ("BETWEEN".equals(operator) || "NOT BETWEEN".equals(operator)) {
+                boolean betweenResult = SqlOperator.evaluateBetween(rowVal, lowValue, highValue, collation);
+                return "NOT BETWEEN".equals(operator) ? !betweenResult : betweenResult;
             }
 
-            // Handle LIKE operator
-            if ("LIKE".equals(operator)) {
-                return SqlOperator.compare(rowVal, "LIKE", comparisonValue, collation);
+            // Handle LIKE and NOT LIKE operator
+            if ("LIKE".equals(operator) || "NOT LIKE".equals(operator)) {
+                boolean likeResult = SqlOperator.compare(rowVal, "LIKE", comparisonValue, collation);
+                return "NOT LIKE".equals(operator) ? !likeResult : likeResult;
             }
 
             if (comparisonValue == null || "NULL".equals(comparisonValue)) {
@@ -170,9 +187,16 @@ public class Clause {
 
     public static class GroupBy {
         public final String column;
+        public final List<String> columns;
 
         public GroupBy(String column) {
             this.column = column;
+            this.columns = java.util.Collections.singletonList(column);
+        }
+
+        public GroupBy(List<String> columns) {
+            this.columns = columns;
+            this.column = columns != null && !columns.isEmpty() ? columns.get(0) : "";
         }
     }
 
@@ -188,26 +212,89 @@ public class Clause {
         }
 
         public boolean evaluate(Map<String, Object> groupRow) {
+            return evaluate(groupRow, null);
+        }
+
+        public boolean evaluate(Map<String, Object> groupRow, DatabaseEngine engine) {
             Object rowVal = groupRow.get(aggregateFunc);
+            if (rowVal == null) {
+                rowVal = DatabaseEngine.getRowValue(groupRow, aggregateFunc);
+            }
             if (rowVal == null) return false;
 
-            double rNum;
-            double vNum;
-            try {
-                rNum = Double.parseDouble(rowVal.toString());
-                vNum = Double.parseDouble(value.toString());
-            } catch (NumberFormatException e) {
-                return false;
+            Object targetVal = value;
+            if (value instanceof String) {
+                String strVal = (String) value;
+                if (engine != null && (strVal.contains("(") || strVal.contains("-") || strVal.contains("+") || strVal.contains("*") || strVal.startsWith("@"))) {
+                    try {
+                        Object evalRes = SqlFunctions.evaluate(strVal, groupRow, engine);
+                        if (evalRes != null) {
+                            targetVal = evalRes;
+                        }
+                    } catch (Exception ignored) {
+                    }
+                }
             }
 
+            if (rowVal instanceof Number && targetVal instanceof Number) {
+                double rNum = ((Number) rowVal).doubleValue();
+                double vNum = ((Number) targetVal).doubleValue();
+                switch (operator) {
+                    case "=": return rNum == vNum;
+                    case "!=":
+                    case "<>": return rNum != vNum;
+                    case ">": return rNum > vNum;
+                    case "<": return rNum < vNum;
+                    case ">=": return rNum >= vNum;
+                    case "<=": return rNum <= vNum;
+                    default: return false;
+                }
+            }
+
+            try {
+                double rNum = Double.parseDouble(rowVal.toString());
+                double vNum = Double.parseDouble(targetVal.toString());
+                switch (operator) {
+                    case "=": return rNum == vNum;
+                    case "!=":
+                    case "<>": return rNum != vNum;
+                    case ">": return rNum > vNum;
+                    case "<": return rNum < vNum;
+                    case ">=": return rNum >= vNum;
+                    case "<=": return rNum <= vNum;
+                    default: return false;
+                }
+            } catch (NumberFormatException ignored) {}
+
+            try {
+                java.time.LocalDateTime dt1 = SqlFunctions.parseDateTime(rowVal);
+                java.time.LocalDateTime dt2 = SqlFunctions.parseDateTime(targetVal);
+                if (dt1 != null && dt2 != null) {
+                    int cmp = dt1.compareTo(dt2);
+                    switch (operator) {
+                        case "=": return cmp == 0;
+                        case "!=":
+                        case "<>": return cmp != 0;
+                        case ">": return cmp > 0;
+                        case "<": return cmp < 0;
+                        case ">=": return cmp >= 0;
+                        case "<=": return cmp <= 0;
+                        default: return false;
+                    }
+                }
+            } catch (Exception ignored) {}
+
+            String rStr = rowVal.toString();
+            String vStr = targetVal.toString();
+            int cmp = rStr.compareTo(vStr);
             switch (operator) {
-                case "=": return rNum == vNum;
+                case "=": return cmp == 0;
                 case "!=":
-                case "<>": return rNum != vNum;
-                case ">": return rNum > vNum;
-                case "<": return rNum < vNum;
-                case ">=": return rNum >= vNum;
-                case "<=": return rNum <= vNum;
+                case "<>": return cmp != 0;
+                case ">": return cmp > 0;
+                case "<": return cmp < 0;
+                case ">=": return cmp >= 0;
+                case "<=": return cmp <= 0;
                 default: return false;
             }
         }
@@ -220,22 +307,28 @@ public class Clause {
         public final String rightCol;
         public final String alias;
         public final List<Clause.Where> extraConditions;
+        public final Command.Select derivedTableQuery;
 
         public Join(String table, String type, String leftCol, String rightCol) {
-            this(table, type, leftCol, rightCol, null);
+            this(table, type, leftCol, rightCol, null, new java.util.ArrayList<Clause.Where>(), null);
         }
 
         public Join(String table, String type, String leftCol, String rightCol, String alias) {
-            this(table, type, leftCol, rightCol, alias, new java.util.ArrayList<Clause.Where>());
+            this(table, type, leftCol, rightCol, alias, new java.util.ArrayList<Clause.Where>(), null);
         }
 
         public Join(String table, String type, String leftCol, String rightCol, String alias, List<Clause.Where> extraConditions) {
+            this(table, type, leftCol, rightCol, alias, extraConditions, null);
+        }
+
+        public Join(String table, String type, String leftCol, String rightCol, String alias, List<Clause.Where> extraConditions, Command.Select derivedTableQuery) {
             this.table = table;
             this.type = type.toUpperCase();
             this.leftCol = leftCol;
             this.rightCol = rightCol;
             this.alias = alias;
             this.extraConditions = extraConditions;
+            this.derivedTableQuery = derivedTableQuery;
         }
     }
 

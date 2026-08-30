@@ -41,8 +41,9 @@ PocketSQL operates by combining a custom SQL parsing pipeline, a JSON-based sche
 
 ### 1. Advanced SQL Database Engine
 * **Complete CRUD**: Supports standard queries (`SELECT`, `INSERT`, `UPDATE`, `DELETE`).
-* **DDL Commands**: Create and drop databases and tables (`CREATE DATABASE`, `DROP DATABASE`, `CREATE TABLE`, `DROP TABLE`).
-* **Table Alteration**: Modify column schemas (`ADD COLUMN`, `MODIFY COLUMN`, `CHANGE COLUMN`, `RENAME COLUMN`, `DROP COLUMN`).
+* **DDL Commands**: Create and drop databases and tables (`CREATE DATABASE`, `DROP DATABASE`, `CREATE TABLE`, `DROP TABLE`). Features robust case-insensitive table resolution (e.g. `DROP TABLE users;` matching `USERS`).
+* **Table Alteration**: Modify column schemas (`ADD COLUMN`, `MODIFY COLUMN`, `CHANGE COLUMN`, `RENAME COLUMN`, `DROP COLUMN`, `ADD PRIMARY KEY`, `DROP PRIMARY KEY`, `ADD UNIQUE`, `DROP INDEX`). Includes strict validation for missing columns, duplicate primary/unique keys, and constraint metadata synchronization.
+* **Window Functions**: Advanced analytical functions including `PERCENT_RANK()` and `NTILE(n)` over `ORDER BY` partitioning windows.
 * **Transaction Control**: Complete transaction commands with rollback boundaries:
   - `START TRANSACTION;`
   - `COMMIT;`

@@ -14,7 +14,7 @@ public class SqlScanner {
     static {
         String[] keywords = {
             // DML / DDL
-            "SELECT", "FROM", "WHERE", "INSERT", "INTO", "VALUES", "UPDATE", "SET", "DELETE",
+            "WITH", "SELECT", "FROM", "WHERE", "INSERT", "INTO", "VALUES", "UPDATE", "SET", "DELETE",
             "CREATE", "DATABASE", "DROP", "USE", "TABLE", "SHOW", "DATABASES", "TABLES",
             "DESCRIBE", "DESC", "IF", "NOT", "EXISTS", "ORDER", "BY", "LIMIT", "ASC",
             "LIKE", "AND", "OR", "NULL", "CALL", "HELP",
@@ -23,6 +23,7 @@ public class SqlScanner {
             "JOIN", "INNER", "LEFT", "RIGHT", "CROSS", "UNION", "ALL", "DISTINCT", "AS", "GROUP", "HAVING", "IS",
             "COLUMN", "COLUMNS", "FIRST", "AFTER", "ENGINE", "CHARACTER", "MODIFY", "CHANGE", "CONSTRAINT", "CONVERT", "COLLATE", "CHARSET",
             "FUNCTION", "RETURNS", "RETURN", "DECLARE", "END", "THEN", "ELSE", "WHILE", "LOOP", "REPEAT", "UNTIL", "CASE", "WHEN", "STATUS",
+            "OVER", "PARTITION",
             // Column constraints
             "PRIMARY", "KEY", "AUTO_INCREMENT", "UNIQUE", "DEFAULT", "COMMENT", "DUPLICATE",
             "FOREIGN", "REFERENCES", "CHECK", "BETWEEN", "IN", "INDEX", "FULLTEXT", "SPATIAL", "NO", "ACTION", "RESTRICT", "CASCADE",

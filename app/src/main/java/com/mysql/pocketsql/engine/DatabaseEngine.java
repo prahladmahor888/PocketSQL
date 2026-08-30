@@ -275,7 +275,7 @@ public class DatabaseEngine {
                 duration
             );
         } catch (SqlSyntaxException e) {
-            return QueryResult.createError("ERROR 1064 (42000): You have an error in your SQL syntax; check the manual that corresponds to your PocketSQL server version for the right syntax near '" + e.getMessage() + "'");
+            return QueryResult.createError("ERROR 1064 (42000): You have an error in your SQL syntax; check the manual that corresponds to your PocketSQL server version (1.0.1) for the right syntax near '" + e.getMessage() + "'");
         } catch (Throwable e) {
             com.mysql.pocketsql.engine.SqlLog.printStackTrace(e);
             String msg = e.getMessage() != null ? e.getMessage() : "Unknown error";
@@ -307,21 +307,24 @@ public class DatabaseEngine {
 
     public String resolveTableName(String tableName) {
         if (tableName == null) return null;
+        try {
+            ensureActiveSchema();
+        } catch (Exception ignored) {}
         if (activeSchemaJson == null) return tableName;
-        
-        if (activeSchemaJson != lastResolvedSchema || activeSchemaJson.length() != tableNameCache.size()) {
-            tableNameCache.clear();
-            Iterator<String> keys = activeSchemaJson.keys();
-            while (keys.hasNext()) {
-                String key = keys.next();
-                tableNameCache.put(key.toLowerCase(), key);
-            }
-            lastResolvedSchema = activeSchemaJson;
+
+        if (tableName.contains(".")) {
+            int idx = tableName.indexOf('.');
+            String db = tableName.substring(0, idx);
+            String tbl = tableName.substring(idx + 1);
+            return db + "." + resolveTableName(tbl);
         }
 
-        String cached = tableNameCache.get(tableName.toLowerCase());
-        if (cached != null) {
-            return cached;
+        Iterator<String> keys = activeSchemaJson.keys();
+        while (keys.hasNext()) {
+            String key = keys.next();
+            if (key.equalsIgnoreCase(tableName)) {
+                return key;
+            }
         }
         return tableName;
     }
@@ -354,6 +357,103 @@ public class DatabaseEngine {
         if (activeDatabaseName == null) {
             throw new Exception("No database selected. Run 'USE <db_name>' first.");
         }
+    }
+
+    public QueryResult executeWith(Map<String, Command.Select> ctes, Command mainQuery) throws Exception {
+        ensureActiveSchema();
+        List<String> tempTables = new ArrayList<>();
+        try {
+            for (Map.Entry<String, Command.Select> entry : ctes.entrySet()) {
+                String cteName = entry.getKey();
+                QueryResult res = selectFrom(entry.getValue());
+                if (!res.success) {
+                    return res;
+                }
+                createTableFromQueryResult(cteName, res);
+                tempTables.add(cteName);
+            }
+            return mainQuery.execute(this);
+        } finally {
+            for (String tbl : tempTables) {
+                try {
+                    dropTable(tbl, true);
+                } catch (Exception ignored) {}
+            }
+        }
+    }
+
+    private void createTableFromQueryResult(String tableName, QueryResult qres) throws Exception {
+        List<String> rawCols = qres.columns != null ? qres.columns : new ArrayList<>();
+        List<String> cols = new ArrayList<>();
+        for (String c : rawCols) {
+            cols.add(getDisplayColumnName(c));
+        }
+        List<String> types = qres.columnTypes != null ? qres.columnTypes : new ArrayList<>();
+        while (types.size() < cols.size()) {
+            types.add("TEXT");
+        }
+        Map<String, String> colDefaults = new HashMap<>();
+        Map<String, String> colOnUpdates = new HashMap<>();
+        Map<String, Boolean> colNullables = new HashMap<>();
+        Map<String, String> colKeys = new HashMap<>();
+        Map<String, String> colExtras = new HashMap<>();
+        for (String c : cols) {
+            colNullables.put(c, true);
+            colKeys.put(c, "");
+        }
+        createTable(tableName, cols, types, colDefaults, colOnUpdates, colNullables, colKeys, colExtras,
+                    new ArrayList<>(), new HashMap<>(), new ArrayList<>(), new ArrayList<>(), false);
+
+        if (qres.rows != null && !qres.rows.isEmpty()) {
+            List<List<Object>> valuesList = new ArrayList<>();
+            for (Map<String, Object> r : qres.rows) {
+                List<Object> vals = new ArrayList<>();
+                for (int i = 0; i < rawCols.size(); i++) {
+                    String raw = rawCols.get(i);
+                    String clean = cols.get(i);
+                    Object val = r.get(clean);
+                    if (val == null) val = r.get(raw);
+                    if (val == null) val = getRowValue(r, clean);
+                    if (val == null) val = getRowValue(r, raw);
+                    vals.add(val);
+                }
+                valuesList.add(vals);
+            }
+            insertInto(tableName, cols, valuesList, null);
+        }
+        tableCache.remove(tableName);
+    }
+
+    public QueryResult insertIntoSelect(String tableName, List<String> columnNames, Command.Select selectQuery) throws Exception {
+        QueryResult selectRes = selectFrom(selectQuery);
+        if (!selectRes.success) {
+            return selectRes;
+        }
+        TableData targetTd = getOrLoadTable(tableName);
+        List<String> targetCols = columnNames != null ? columnNames : new ArrayList<>(targetTd.columns);
+
+        List<List<Object>> valuesList = new ArrayList<>();
+        for (Map<String, Object> selectRow : selectRes.rows) {
+            List<Object> rowVals = new ArrayList<>();
+            for (String col : selectRes.columns) {
+                Object val = selectRow.get(col);
+                if (val == null) {
+                    val = getRowValue(selectRow, col);
+                }
+                rowVals.add(val);
+            }
+            valuesList.add(rowVals);
+        }
+        return insertInto(tableName, targetCols, valuesList, null);
+    }
+
+    public QueryResult createTableAsSelect(String tableName, Command.Select selectQuery, boolean ifNotExists) throws Exception {
+        QueryResult selectRes = selectFrom(selectQuery);
+        if (!selectRes.success) {
+            return selectRes;
+        }
+        createTableFromQueryResult(tableName, selectRes);
+        return QueryResult.createSuccess("Table '" + tableName + "' created successfully", selectRes.rows != null ? selectRes.rows.size() : 0, 0);
     }
 
     public QueryResult createTable(String tableName, List<String> colNames, List<String> colTypes,
@@ -641,6 +741,20 @@ public class DatabaseEngine {
         return QueryResult.createSuccess("Table dropped successfully", 0, 0);
     }
 
+    public QueryResult dropTables(List<String> tableNames, boolean ifExists) throws Exception {
+        if (tableNames == null || tableNames.isEmpty()) {
+            return QueryResult.createSuccess("No tables specified to drop", 0, 0);
+        }
+        QueryResult lastRes = null;
+        for (String tbl : tableNames) {
+            lastRes = dropTable(tbl, ifExists);
+            if (!lastRes.success && !ifExists) {
+                return lastRes;
+            }
+        }
+        return QueryResult.createSuccess("Table(s) dropped successfully", 0, 0);
+    }
+
     public QueryResult showTables() throws Exception {
         return showTables(null, false, null);
     }
@@ -794,6 +908,20 @@ public class DatabaseEngine {
         tableCache.remove(viewName);
 
         return QueryResult.createSuccess("View dropped successfully", 0, 0);
+    }
+
+    public QueryResult dropViews(List<String> viewNames, boolean ifExists) throws Exception {
+        if (viewNames == null || viewNames.isEmpty()) {
+            return QueryResult.createSuccess("No views specified to drop", 0, 0);
+        }
+        QueryResult lastRes = null;
+        for (String view : viewNames) {
+            lastRes = dropView(view, ifExists);
+            if (!lastRes.success && !ifExists) {
+                return lastRes;
+            }
+        }
+        return QueryResult.createSuccess("View(s) dropped successfully", 0, 0);
     }
 
     public QueryResult createProcedure(String procName, String procDef) throws Exception {
@@ -1884,7 +2012,14 @@ public class DatabaseEngine {
                 Map<String, Object> insertMap = new HashMap<>();
                 for (int i = 0; i < colNames.size(); i++) {
                     String col = colNames.get(i);
-                    if (!td.columns.contains(col)) {
+                    String actualColName = null;
+                    for (String c : td.columns) {
+                        if (c.equalsIgnoreCase(col)) {
+                            actualColName = c;
+                            break;
+                        }
+                    }
+                    if (actualColName == null) {
                         throw new Exception("Error: Unknown column '" + col + "' in table '" + tableName + "'");
                     }
                     Object val = values.get(i);
@@ -1893,9 +2028,9 @@ public class DatabaseEngine {
                         val = SqlFunctions.evaluate(exprStr, insertMap, this);
                     }
                     if ("\u0000DEFAULT\u0000".equals(val)) {
-                        val = getDefaultValue(tableName, col);
+                        val = getDefaultValue(tableName, actualColName);
                     }
-                    insertMap.put(col, val);
+                    insertMap.put(actualColName, val);
                 }
 
                 // Fill all schema columns
@@ -2150,29 +2285,12 @@ public class DatabaseEngine {
         Object val = getRowValue(row, colName);
         if (val != null) return val;
 
-        if (aliases != null) {
-            Map<String, List<String>> revAliases = (Map<String, List<String>>) (Object) aliases.get("\u0000reversed\u0000");
-            if (revAliases == null) {
-                revAliases = new HashMap<>();
-                for (Map.Entry<String, String> entry : aliases.entrySet()) {
-                    if (entry.getKey().startsWith("\u0000")) continue;
-                    String orig = entry.getValue().toLowerCase();
-                    List<String> list = revAliases.get(orig);
-                    if (list == null) {
-                        list = new ArrayList<>();
-                        revAliases.put(orig, list);
-                    }
-                    list.add(entry.getKey());
-                }
-                try {
-                    aliases.put("\u0000reversed\u0000", (String) (Object) revAliases);
-                } catch (UnsupportedOperationException ignored) {}
-            }
-
-            List<String> matchingAliases = revAliases.get(colName.toLowerCase());
-            if (matchingAliases != null) {
-                for (String aliasKey : matchingAliases) {
-                    val = getRowValue(row, aliasKey);
+        if (aliases != null && !aliases.isEmpty()) {
+            String colLower = colName.toLowerCase();
+            for (Map.Entry<String, String> entry : aliases.entrySet()) {
+                if (entry.getKey().startsWith("\u0000")) continue;
+                if (entry.getValue() != null && entry.getValue().toLowerCase().equals(colLower)) {
+                    val = getRowValue(row, entry.getKey());
                     if (val != null) return val;
                 }
             }
@@ -2246,88 +2364,222 @@ public class DatabaseEngine {
 
     private boolean isAggregate(String expr) {
         if (expr == null) return false;
-        String upper = expr.toUpperCase().trim();
-        return upper.startsWith("COUNT(") || upper.startsWith("SUM(") ||
-               upper.startsWith("AVG(") || upper.startsWith("MIN(") ||
-               upper.startsWith("MAX(");
+        if (expr.toUpperCase().contains("OVER")) return false;
+        java.util.regex.Pattern p = java.util.regex.Pattern.compile("(?i)\\b(COUNT|SUM|AVG|MIN|MAX)\\s*\\(");
+        return p.matcher(expr).find();
     }
 
     private Object evaluateAggregate(String aggExpr, List<Map<String, Object>> groupRows) {
-        String upper = aggExpr.toUpperCase().trim();
-        if (upper.startsWith("COUNT(")) {
-            if (upper.equals("COUNT(*)")) {
+        if (aggExpr == null || groupRows == null || groupRows.isEmpty()) return null;
+
+        if (aggExpr.toUpperCase().contains(" OVER ")) {
+            return null;
+        }
+
+        // Use balanced-parentheses extraction instead of simple [^)]* regex
+        // so that COUNT(DISTINCT FORMAT(order_date, 'yyyy-MM')) is handled correctly.
+        List<int[]> aggMatches = findAggregateMatches(aggExpr);
+        if (aggMatches.isEmpty()) {
+            return getRowValue(groupRows.get(0), aggExpr);
+        }
+
+        // Replace each AGG(...) with its computed value, right-to-left to preserve positions
+        StringBuilder result = new StringBuilder(aggExpr);
+        Object singleResult = null;
+        int matchCount = aggMatches.size();
+        for (int i = aggMatches.size() - 1; i >= 0; i--) {
+            int[] m = aggMatches.get(i);
+            int start = m[0], end = m[1]; // start = index of func name start, end = index after closing ')'
+            String fullMatch = aggExpr.substring(start, end);
+            // Extract funcName and inner args
+            int parenStart = fullMatch.indexOf('(');
+            String funcName = fullMatch.substring(0, parenStart).trim().toUpperCase();
+            String inner = fullMatch.substring(parenStart + 1, fullMatch.length() - 1).trim();
+            Object val = evaluateSingleAggregate(funcName, inner, groupRows);
+            singleResult = val;
+            String rep = val == null ? "NULL" : val.toString();
+            result.replace(start, end, rep);
+        }
+
+        String finalExpr = result.toString().trim();
+        if ("NULL".equalsIgnoreCase(finalExpr)) {
+            return null;
+        }
+        // If the result is purely a single aggregate result, return it directly to avoid
+        // re-evaluation (e.g., "2020-01-15" being parsed as arithmetic 2020-01-15=2004)
+        if (matchCount == 1 && singleResult != null && finalExpr.equals(singleResult.toString())) {
+            return singleResult;
+        }
+        try {
+            return SqlFunctions.evaluate(finalExpr, groupRows.get(0), this);
+        } catch (Exception e) {
+            return finalExpr;
+        }
+    }
+
+    /**
+     * Finds all top-level aggregate function matches (COUNT, SUM, AVG, MIN, MAX) in an expression,
+     * respecting nested parentheses. Returns list of [start, end) index pairs.
+     */
+    private List<int[]> findAggregateMatches(String expr) {
+        List<int[]> results = new ArrayList<>();
+        java.util.regex.Pattern funcStart = java.util.regex.Pattern.compile("(?i)\\b(COUNT|SUM|AVG|MIN|MAX)\\s*\\(");
+        java.util.regex.Matcher m = funcStart.matcher(expr);
+        while (m.find()) {
+            int start = m.start();
+            if (isIndexInsideSubquery(expr, start)) {
+                continue;
+            }
+            int parenOpen = m.end() - 1; // position of '('
+            // Walk forward to find the matching closing ')'
+            int depth = 1;
+            int pos = parenOpen + 1;
+            boolean inStr = false;
+            char strChar = 0;
+            while (pos < expr.length() && depth > 0) {
+                char c = expr.charAt(pos);
+                if (inStr) {
+                    if (c == strChar) inStr = false;
+                } else if (c == '\'' || c == '"') {
+                    inStr = true; strChar = c;
+                } else if (c == '(') {
+                    depth++;
+                } else if (c == ')') {
+                    depth--;
+                }
+                pos++;
+            }
+            if (depth == 0) {
+                results.add(new int[]{start, pos}); // pos is one past the closing ')'
+            }
+        }
+        return results;
+    }
+
+    private boolean isIndexInsideSubquery(String expr, int index) {
+        int pos = 0;
+        String upper = expr.toUpperCase();
+        while (pos < expr.length()) {
+            int subIdx = upper.indexOf("(SELECT", pos);
+            if (subIdx == -1) break;
+            int depth = 1;
+            int cur = subIdx + 1;
+            boolean inStr = false;
+            char strChar = 0;
+            while (cur < expr.length() && depth > 0) {
+                char c = expr.charAt(cur);
+                if (inStr) {
+                    if (c == strChar) inStr = false;
+                } else if (c == '\'' || c == '"') {
+                    inStr = true; strChar = c;
+                } else if (c == '(') {
+                    depth++;
+                } else if (c == ')') {
+                    depth--;
+                }
+                cur++;
+            }
+            if (index > subIdx && index < cur) {
+                return true;
+            }
+            pos = subIdx + 7;
+        }
+        return false;
+    }
+
+
+
+    private Object getRowValueOrEvaluate(Map<String, Object> r, String expr) {
+        if (expr == null || expr.trim().isEmpty()) return null;
+        Object val = getRowValue(r, expr);
+        if (val == null && !r.containsKey(expr)) {
+            try {
+                val = SqlFunctions.evaluate(expr, r, this);
+            } catch (Exception ignored) {}
+        }
+        return val;
+    }
+
+    private Object evaluateSingleAggregate(String funcName, String col, List<Map<String, Object>> groupRows) {
+        // Strip DISTINCT modifier (e.g. COUNT(DISTINCT FORMAT(...)))
+        boolean distinct = false;
+        String colExpr = col.trim();
+        if (colExpr.toUpperCase().startsWith("DISTINCT ")) {
+            distinct = true;
+            colExpr = colExpr.substring("DISTINCT ".length()).trim();
+        } else if (colExpr.toUpperCase().startsWith("DISTINCT\t")) {
+            distinct = true;
+            colExpr = colExpr.substring(9).trim();
+        }
+
+        if ("COUNT".equals(funcName)) {
+            if ("*".equals(colExpr)) {
                 return (long) groupRows.size();
             }
-            String col = aggExpr.substring(aggExpr.indexOf('(') + 1, aggExpr.lastIndexOf(')')).trim();
+            if (distinct) {
+                java.util.Set<String> seen = new java.util.HashSet<>();
+                for (Map<String, Object> r : groupRows) {
+                    Object v = getRowValueOrEvaluate(r, colExpr);
+                    if (v != null) seen.add(v.toString());
+                }
+                return (long) seen.size();
+            }
             long count = 0;
             for (Map<String, Object> r : groupRows) {
-                if (getRowValue(r, col) != null) {
+                if (getRowValueOrEvaluate(r, colExpr) != null) {
                     count++;
                 }
             }
             return count;
         }
 
-        if (upper.startsWith("SUM(")) {
-            String col = aggExpr.substring(aggExpr.indexOf('(') + 1, aggExpr.lastIndexOf(')')).trim();
+        if ("SUM".equals(funcName)) {
             double sum = 0;
             boolean hasNumeric = false;
             for (Map<String, Object> r : groupRows) {
-                Object val = getRowValue(r, col);
+                Object val = getRowValueOrEvaluate(r, colExpr);
                 if (val != null) {
                     try {
                         sum += Double.parseDouble(val.toString());
                         hasNumeric = true;
-                    } catch (NumberFormatException e) {
-                        // ignore
-                    }
+                    } catch (NumberFormatException ignored) {}
                 }
             }
             return hasNumeric ? sum : null;
         }
 
-        if (upper.startsWith("AVG(")) {
-            String col = aggExpr.substring(aggExpr.indexOf('(') + 1, aggExpr.lastIndexOf(')')).trim();
+        if ("AVG".equals(funcName)) {
             double sum = 0;
             long count = 0;
             for (Map<String, Object> r : groupRows) {
-                Object val = getRowValue(r, col);
+                Object val = getRowValueOrEvaluate(r, colExpr);
                 if (val != null) {
                     try {
                         sum += Double.parseDouble(val.toString());
                         count++;
-                    } catch (NumberFormatException e) {
-                        // ignore
-                    }
+                    } catch (NumberFormatException ignored) {}
                 }
             }
             return count > 0 ? (sum / count) : null;
         }
 
-        if (upper.startsWith("MIN(")) {
-            String col = aggExpr.substring(aggExpr.indexOf('(') + 1, aggExpr.lastIndexOf(')')).trim();
+        if ("MIN".equals(funcName)) {
             Double minNum = null;
             String minStr = null;
             boolean numeric = true;
             for (Map<String, Object> r : groupRows) {
-                Object val = getRowValue(r, col);
+                Object val = getRowValueOrEvaluate(r, colExpr);
                 if (val != null) {
                     if (numeric) {
                         try {
                             double d = Double.parseDouble(val.toString());
-                            if (minNum == null || d < minNum) {
-                                minNum = d;
-                            }
+                            if (minNum == null || d < minNum) minNum = d;
                         } catch (NumberFormatException e) {
                             numeric = false;
-                            if (minStr == null || val.toString().compareTo(minStr) < 0) {
-                                minStr = val.toString();
-                            }
+                            if (minStr == null || val.toString().compareTo(minStr) < 0) minStr = val.toString();
                         }
                     } else {
-                        if (val.toString().compareTo(minStr) < 0) {
-                            minStr = val.toString();
-                        }
+                        if (val.toString().compareTo(minStr) < 0) minStr = val.toString();
                     }
                 }
             }
@@ -2335,30 +2587,23 @@ public class DatabaseEngine {
             return minStr;
         }
 
-        if (upper.startsWith("MAX(")) {
-            String col = aggExpr.substring(aggExpr.indexOf('(') + 1, aggExpr.lastIndexOf(')')).trim();
+        if ("MAX".equals(funcName)) {
             Double maxNum = null;
             String maxStr = null;
             boolean numeric = true;
             for (Map<String, Object> r : groupRows) {
-                Object val = getRowValue(r, col);
+                Object val = getRowValueOrEvaluate(r, colExpr);
                 if (val != null) {
                     if (numeric) {
                         try {
                             double d = Double.parseDouble(val.toString());
-                            if (maxNum == null || d > maxNum) {
-                                maxNum = d;
-                            }
+                            if (maxNum == null || d > maxNum) maxNum = d;
                         } catch (NumberFormatException e) {
                             numeric = false;
-                            if (maxStr == null || val.toString().compareTo(maxStr) > 0) {
-                                maxStr = val.toString();
-                            }
+                            if (maxStr == null || val.toString().compareTo(maxStr) > 0) maxStr = val.toString();
                         }
                     } else {
-                        if (val.toString().compareTo(maxStr) > 0) {
-                            maxStr = val.toString();
-                        }
+                        if (val.toString().compareTo(maxStr) > 0) maxStr = val.toString();
                     }
                 }
             }
@@ -2367,6 +2612,379 @@ public class DatabaseEngine {
         }
 
         return null;
+    }
+
+    private void evaluateWindowFunctions(Command.Select select, List<Map<String, Object>> rows) {
+        if (select == null || select.projection == null || rows == null || rows.isEmpty()) return;
+
+        List<String> windowFuncExprs = new ArrayList<>();
+        for (String rawProjItem : select.projection) {
+            if (rawProjItem == null) continue;
+            String projItem = rawProjItem;
+            int asIdx = rawProjItem.toUpperCase().lastIndexOf(" AS ");
+            if (asIdx != -1) {
+                projItem = rawProjItem.substring(0, asIdx).trim();
+            }
+
+            String upper = projItem.toUpperCase();
+            int idx = 0;
+            while ((idx = upper.indexOf("OVER", idx)) != -1) {
+                if (idx > 0 && !Character.isWhitespace(upper.charAt(idx - 1)) && upper.charAt(idx - 1) != ')') {
+                    idx += 4;
+                    continue;
+                }
+                
+                int overStart = projItem.indexOf('(', idx);
+                if (overStart == -1) { idx += 4; continue; }
+                int parenCount = 1;
+                int overEnd = -1;
+                for (int i = overStart + 1; i < projItem.length(); i++) {
+                    if (projItem.charAt(i) == '(') parenCount++;
+                    else if (projItem.charAt(i) == ')') parenCount--;
+                    if (parenCount == 0) {
+                        overEnd = i;
+                        break;
+                    }
+                }
+                if (overEnd == -1) { idx += 4; continue; }
+                
+                int funcEnd = idx - 1;
+                while (funcEnd >= 0 && Character.isWhitespace(projItem.charAt(funcEnd))) funcEnd--;
+                if (funcEnd >= 0 && projItem.charAt(funcEnd) == ')') {
+                    parenCount = 1;
+                    int funcParenStart = -1;
+                    for (int i = funcEnd - 1; i >= 0; i--) {
+                        if (projItem.charAt(i) == ')') parenCount++;
+                        else if (projItem.charAt(i) == '(') parenCount--;
+                        if (parenCount == 0) {
+                            funcParenStart = i;
+                            break;
+                        }
+                    }
+                    if (funcParenStart != -1) {
+                        int funcNameStart = funcParenStart - 1;
+                        while (funcNameStart >= 0 && (Character.isLetterOrDigit(projItem.charAt(funcNameStart)) || projItem.charAt(funcNameStart) == '_')) {
+                            funcNameStart--;
+                        }
+                        funcNameStart++; // inclusive
+                        
+                        String fullExpr = projItem.substring(funcNameStart, overEnd + 1);
+                        windowFuncExprs.add(fullExpr);
+                    }
+                }
+                
+                idx = overEnd + 1;
+            }
+        }
+
+        for (String projItem : windowFuncExprs) {
+            String upper = projItem.toUpperCase().trim();
+            int overIdx = upper.lastIndexOf("OVER");
+            if (overIdx == -1) continue; // Should not happen with our parser
+
+            String funcPart = projItem.substring(0, overIdx).trim();
+            String overPart = projItem.substring(overIdx + 4).trim();
+            if (overPart.startsWith("(") && overPart.endsWith(")")) {
+                overPart = overPart.substring(1, overPart.length() - 1).trim();
+            }
+
+            // --- Parse PARTITION BY ---
+            List<String> partitionCols = new ArrayList<>();
+            int partitionByIdx = overPart.toUpperCase().indexOf("PARTITION BY ");
+            int orderByIdx = overPart.toUpperCase().indexOf("ORDER BY ");
+            
+            if (partitionByIdx != -1) {
+                String partitionColsStr;
+                if (orderByIdx != -1 && orderByIdx > partitionByIdx) {
+                    partitionColsStr = overPart.substring(partitionByIdx + 13, orderByIdx).trim();
+                } else {
+                    partitionColsStr = overPart.substring(partitionByIdx + 13).trim();
+                }
+                for (String pCol : partitionColsStr.split(",")) {
+                    if (!pCol.trim().isEmpty()) {
+                        partitionCols.add(pCol.trim());
+                    }
+                }
+            }
+
+            // --- Parse ORDER BY col and optional frame spec (ROWS BETWEEN ... AND ...) ---
+            String orderByCol = null;
+            boolean asc = true;
+            // Frame: default for window with ORDER BY is RANGE BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW
+            // (cumulative). ROWS BETWEEN N PRECEDING AND CURRENT ROW = sliding window of N+1 rows.
+            int framePreceding = Integer.MAX_VALUE; // UNBOUNDED by default
+            int frameFollowing = 0;                 // CURRENT ROW by default
+
+            if (orderByIdx != -1) {
+                String orderClause = overPart.substring(orderByIdx + 9).trim();
+
+                // Extract ROWS BETWEEN ... AND ... frame if present
+                java.util.regex.Matcher frameMatcher = java.util.regex.Pattern.compile(
+                    "(?i)\\b(ROWS|RANGE)\\s+BETWEEN\\s+(.+?)\\s+AND\\s+(.+?)$"
+                ).matcher(orderClause);
+                if (frameMatcher.find()) {
+                    // Strip the frame clause from orderClause
+                    orderClause = orderClause.substring(0, frameMatcher.start()).trim();
+                    String precedingStr = frameMatcher.group(2).trim().toUpperCase();
+                    String followingStr = frameMatcher.group(3).trim().toUpperCase();
+                    if (precedingStr.equals("UNBOUNDED PRECEDING")) {
+                        framePreceding = Integer.MAX_VALUE;
+                    } else if (precedingStr.matches("\\d+\\s+PRECEDING")) {
+                        framePreceding = Integer.parseInt(precedingStr.replaceAll("\\s+PRECEDING", "").trim());
+                    } else if (precedingStr.equals("CURRENT ROW")) {
+                        framePreceding = 0;
+                    }
+                    if (followingStr.equals("UNBOUNDED FOLLOWING")) {
+                        frameFollowing = Integer.MAX_VALUE;
+                    } else if (followingStr.matches("\\d+\\s+FOLLOWING")) {
+                        frameFollowing = Integer.parseInt(followingStr.replaceAll("\\s+FOLLOWING", "").trim());
+                    } else if (followingStr.equals("CURRENT ROW")) {
+                        frameFollowing = 0;
+                    }
+                }
+
+                // Strip trailing ASC / DESC
+                if (orderClause.toUpperCase().endsWith(" DESC")) {
+                    asc = false;
+                    orderByCol = orderClause.substring(0, orderClause.length() - 5).trim();
+                } else if (orderClause.toUpperCase().endsWith(" ASC")) {
+                    orderByCol = orderClause.substring(0, orderClause.length() - 4).trim();
+                } else {
+                    orderByCol = orderClause;
+                }
+                // Final trim in case frame stripping left trailing whitespace
+                if (orderByCol != null) orderByCol = orderByCol.trim();
+            }
+
+            // Group rows by partition columns
+            Map<String, List<Map<String, Object>>> partitions = new LinkedHashMap<>();
+            if (partitionCols.isEmpty()) {
+                partitions.put("all", new ArrayList<>(rows));
+            } else {
+                for (Map<String, Object> row : rows) {
+                    StringBuilder partKey = new StringBuilder();
+                    for (String pCol : partitionCols) {
+                        Object val = getRowValueWithAlias(row, pCol, select.aliases);
+                        if (val == null) val = row.get(pCol);
+                        partKey.append(val).append("|");
+                    }
+                    partitions.computeIfAbsent(partKey.toString(), k -> new ArrayList<>()).add(row);
+                }
+            }
+            
+            rows.clear(); // We will re-add them after processing each partition
+            
+            for (List<Map<String, Object>> partRows : partitions.values()) {
+                // Build and sort the window row list FOR THIS PARTITION
+                List<Map<String, Object>> winRows = new ArrayList<>(partRows);
+            if (orderByCol != null) {
+                final String finalSortCol = orderByCol;
+                final boolean finalAsc = asc;
+                Collections.sort(winRows, new Comparator<Map<String, Object>>() {
+                    @Override
+                    public int compare(Map<String, Object> r1, Map<String, Object> r2) {
+                        Object v1 = getRowValueWithAlias(r1, finalSortCol, select.aliases);
+                        Object v2 = getRowValueWithAlias(r2, finalSortCol, select.aliases);
+                        if (v1 == null) v1 = SqlFunctions.evaluate(finalSortCol, r1, DatabaseEngine.this);
+                        if (v2 == null) v2 = SqlFunctions.evaluate(finalSortCol, r2, DatabaseEngine.this);
+
+                        if (v1 == null && v2 == null) return 0;
+                        if (v1 == null) return finalAsc ? -1 : 1;
+                        if (v2 == null) return finalAsc ? 1 : -1;
+
+                        int cmp;
+                        if (v1 instanceof Number && v2 instanceof Number) {
+                            cmp = Double.compare(((Number) v1).doubleValue(), ((Number) v2).doubleValue());
+                        } else {
+                            cmp = SqlCollation.compare(v1.toString(), v2.toString(), "utf8mb4_general_ci");
+                        }
+                        return finalAsc ? cmp : -cmp;
+                    }
+                });
+            }
+
+            String funcExpr = projItem;
+            int funcAsIdx = funcExpr.toUpperCase().indexOf(" AS ");
+            if (funcAsIdx != -1) {
+                funcExpr = funcExpr.substring(0, funcAsIdx).trim();
+            }
+            String normalizedFuncExpr = null;
+            try {
+                normalizedFuncExpr = SqlFunctions.parse(funcExpr).toString();
+            } catch (Exception e) {
+                normalizedFuncExpr = funcExpr;
+            }
+
+            String funcUpper = funcPart.toUpperCase().trim();
+
+            if (funcUpper.startsWith("SUM(")) {
+                String col = funcPart.substring(funcPart.indexOf('(') + 1, funcPart.lastIndexOf(')')).trim();
+                for (int i = 0; i < winRows.size(); i++) {
+                    int frameStart = (framePreceding == Integer.MAX_VALUE) ? 0 : Math.max(0, i - framePreceding);
+                    int frameEnd = (frameFollowing == Integer.MAX_VALUE) ? winRows.size() - 1 : Math.min(winRows.size() - 1, i + frameFollowing);
+                    double runningSum = 0;
+                    boolean hasVal = false;
+                    for (int j = frameStart; j <= frameEnd; j++) {
+                        Object val = getRowValueOrEvaluate(winRows.get(j), col);
+                        if (val != null) {
+                            try { runningSum += Double.parseDouble(val.toString()); hasVal = true; }
+                            catch (NumberFormatException ignored) {}
+                        }
+                    }
+                    putWindowResult(winRows.get(i), select, projItem, normalizedFuncExpr, hasVal ? runningSum : null);
+                }
+            } else if (funcUpper.startsWith("AVG(")) {
+                String col = funcPart.substring(funcPart.indexOf('(') + 1, funcPart.lastIndexOf(')')).trim();
+                for (int i = 0; i < winRows.size(); i++) {
+                    int frameStart = (framePreceding == Integer.MAX_VALUE) ? 0 : Math.max(0, i - framePreceding);
+                    int frameEnd = (frameFollowing == Integer.MAX_VALUE) ? winRows.size() - 1 : Math.min(winRows.size() - 1, i + frameFollowing);
+                    double sum = 0;
+                    long count = 0;
+                    for (int j = frameStart; j <= frameEnd; j++) {
+                        Object val = getRowValueOrEvaluate(winRows.get(j), col);
+                        if (val != null) {
+                            try { sum += Double.parseDouble(val.toString()); count++; }
+                            catch (NumberFormatException ignored) {}
+                        }
+                    }
+                    putWindowResult(winRows.get(i), select, projItem, normalizedFuncExpr, count > 0 ? (sum / count) : null);
+                }
+            } else if (funcUpper.startsWith("COUNT(")) {
+                long count = 0;
+                for (Map<String, Object> row : winRows) {
+                    count++;
+                    putWindowResult(row, select, projItem, normalizedFuncExpr, count);
+                }
+            } else if (funcUpper.startsWith("ROW_NUMBER()")) {
+                long rn = 1;
+                for (Map<String, Object> row : winRows) {
+                    putWindowResult(row, select, projItem, normalizedFuncExpr, rn++);
+                }
+            } else if (funcUpper.startsWith("DENSE_RANK()")) {
+                long rank = 0;
+                Object prevVal = null;
+                boolean first = true;
+                for (Map<String, Object> row : winRows) {
+                    Object curVal = orderByCol != null ? getRowValueWithAlias(row, orderByCol, select.aliases) : null;
+                    if (curVal == null && orderByCol != null) curVal = row.get(orderByCol);
+                    if (first || (curVal == null ? prevVal != null : !curVal.equals(prevVal))) {
+                        rank++;
+                        prevVal = curVal;
+                        first = false;
+                    }
+                    putWindowResult(row, select, projItem, normalizedFuncExpr, rank);
+                }
+            } else if (funcUpper.startsWith("RANK()")) {
+                long rank = 1;
+                long pos = 1;
+                Object prevVal = null;
+                boolean first = true;
+                for (Map<String, Object> row : winRows) {
+                    Object curVal = orderByCol != null ? getRowValueWithAlias(row, orderByCol, select.aliases) : null;
+                    if (curVal == null && orderByCol != null) curVal = row.get(orderByCol);
+                    if (first) {
+                        rank = 1;
+                        prevVal = curVal;
+                        first = false;
+                    } else if (curVal == null ? prevVal != null : !curVal.equals(prevVal)) {
+                        rank = pos;
+                        prevVal = curVal;
+                    }
+                    pos++;
+                    putWindowResult(row, select, projItem, normalizedFuncExpr, rank);
+                }
+            } else if (funcUpper.startsWith("PERCENT_RANK()")) {
+                long rank = 1;
+                long pos = 1;
+                Object prevVal = null;
+                boolean first = true;
+                for (Map<String, Object> row : winRows) {
+                    Object curVal = orderByCol != null ? getRowValueWithAlias(row, orderByCol, select.aliases) : null;
+                    if (curVal == null && orderByCol != null) curVal = row.get(orderByCol);
+                    if (first) {
+                        rank = 1;
+                        prevVal = curVal;
+                        first = false;
+                    } else if (curVal == null ? prevVal != null : !curVal.equals(prevVal)) {
+                        rank = pos;
+                        prevVal = curVal;
+                    }
+                    pos++;
+                    double pr = winRows.size() > 1 ? (double)(rank - 1) / (winRows.size() - 1) : 0.0;
+                    putWindowResult(row, select, projItem, normalizedFuncExpr, pr);
+                }
+            } else if (funcUpper.startsWith("NTILE(")) {
+                String argStr = funcPart.substring(funcPart.indexOf('(') + 1, funcPart.lastIndexOf(')')).trim();
+                int numBuckets = 1;
+                try { numBuckets = Integer.parseInt(argStr); } catch (NumberFormatException ignored) {}
+                if (numBuckets < 1) numBuckets = 1;
+                int totalRows = winRows.size();
+                int baseSize = totalRows / numBuckets;
+                int rem = totalRows % numBuckets;
+                int currentBucket = 1;
+                int currentBucketRows = 0;
+                for (Map<String, Object> row : winRows) {
+                    int limit = baseSize + (currentBucket <= rem ? 1 : 0);
+                    putWindowResult(row, select, projItem, normalizedFuncExpr, (long)currentBucket);
+                    currentBucketRows++;
+                    if (currentBucketRows >= limit && currentBucket < numBuckets) {
+                        currentBucket++;
+                        currentBucketRows = 0;
+                    }
+                }
+            } else if (funcUpper.startsWith("LAG(")) {
+                String arg = funcPart.substring(funcPart.indexOf('(') + 1, funcPart.lastIndexOf(')')).trim();
+                Object prevVal = null;
+                for (Map<String, Object> row : winRows) {
+                    Object curVal = getRowValueWithAlias(row, arg, select.aliases);
+                    if (curVal == null) curVal = row.get(arg);
+                    
+                    System.out.println("DEBUG WINDOW: arg='" + arg + "', curVal=" + curVal + ", keys=" + row.keySet());
+                    System.out.println("DEBUG WINDOW PUT: key='" + normalizedFuncExpr + "', val=" + prevVal);
+                    putWindowResult(row, select, projItem, normalizedFuncExpr, prevVal);
+                    prevVal = curVal;
+                }
+            } else if (funcUpper.startsWith("LEAD(")) {
+                String arg = funcPart.substring(funcPart.indexOf('(') + 1, funcPart.lastIndexOf(')')).trim();
+                for (int i = 0; i < winRows.size(); i++) {
+                    Map<String, Object> row = winRows.get(i);
+                    Object nextVal = null;
+                    if (i + 1 < winRows.size()) {
+                        nextVal = getRowValueWithAlias(winRows.get(i + 1), arg, select.aliases);
+                        if (nextVal == null) nextVal = winRows.get(i + 1).get(arg);
+                    }
+                    putWindowResult(row, select, projItem, normalizedFuncExpr, nextVal);
+                }
+            }
+            rows.addAll(winRows);
+            }
+        }
+    }
+
+    private void putWindowResult(Map<String, Object> row, Command.Select select, String projItem, String funcExpr, Object resVal) {
+        if (projItem != null) {
+            row.put(projItem, resVal);
+            row.put(projItem.replaceAll("\\s+", ""), resVal);
+        }
+        if (funcExpr != null) {
+            row.put(funcExpr, resVal);
+            row.put(funcExpr.replaceAll("\\s+", ""), resVal);
+        }
+        if (select != null && select.aliases != null) {
+            for (Map.Entry<String, String> e : select.aliases.entrySet()) {
+                String k = e.getKey();
+                String v = e.getValue();
+                if (k != null) {
+                    String cleanK = k.replaceAll("\\s+", "");
+                    String cleanP = projItem != null ? projItem.replaceAll("\\s+", "") : "";
+                    String cleanF = funcExpr != null ? funcExpr.replaceAll("\\s+", "") : "";
+                    if (k.equals(projItem) || k.equals(funcExpr) || cleanK.equalsIgnoreCase(cleanP) || cleanK.equalsIgnoreCase(cleanF)) {
+                        if (v != null) row.put(v, resVal);
+                        row.put(k, resVal);
+                    }
+                }
+            }
+        }
     }
 
     private String resolveColumnType(Command.Select select, String colName) {
@@ -2412,19 +3030,22 @@ public class DatabaseEngine {
             }
         } else {
             if (where.column != null) {
-                columns.add(where.column);
+                try {
+                    SqlFunctions.Expression expr = SqlFunctions.parse(where.column);
+                    expr.collectColumns(columns);
+                } catch (Exception e) {
+                    columns.add(where.column);
+                }
             }
             if (where.isValueColumn && where.value instanceof String) {
                 String valCol = (String) where.value;
-                if (valCol.contains("(")) {
+                if (!valCol.toUpperCase().contains("SELECT ")) {
                     try {
                         SqlFunctions.Expression expr = SqlFunctions.parse(valCol);
                         expr.collectColumns(columns);
                     } catch (Exception e) {
-                        // ignore or fallback
+                        columns.add(valCol);
                     }
-                } else {
-                    columns.add(valCol);
                 }
             }
         }
@@ -2442,10 +3063,19 @@ public class DatabaseEngine {
                 }
             }
         }
-        // Allow system/constant identifiers
+        // Allow system/constant identifiers and datepart keywords
         if ("system_user".equals(colLower) || "session_user".equals(colLower) || 
             "current_user".equals(colLower) || "database".equals(colLower) || 
-            "version".equals(colLower) || "connection_id".equals(colLower)) {
+            "version".equals(colLower) || "connection_id".equals(colLower) ||
+            "weekday".equals(colLower) || "dw".equals(colLower) || "w".equals(colLower) ||
+            "year".equals(colLower) || "yy".equals(colLower) || "yyyy".equals(colLower) ||
+            "month".equals(colLower) || "mm".equals(colLower) || "m".equals(colLower) ||
+            "day".equals(colLower) || "dd".equals(colLower) || "d".equals(colLower) ||
+            "hour".equals(colLower) || "hh".equals(colLower) ||
+            "minute".equals(colLower) || "mi".equals(colLower) || "n".equals(colLower) ||
+            "second".equals(colLower) || "ss".equals(colLower) || "s".equals(colLower) ||
+            "quarter".equals(colLower) || "qq".equals(colLower) || "q".equals(colLower) ||
+            "dayofyear".equals(colLower) || "dy".equals(colLower)) {
             return true;
         }
 
@@ -2459,6 +3089,69 @@ public class DatabaseEngine {
         } else {
             return allUnqualifiedColumns.contains(colLower);
         }
+    }
+
+    private List<String> expandProjectionList(Command.Select select) {
+        if (select == null || select.projection == null) return null;
+        List<String> expanded = new ArrayList<>();
+        for (String item : select.projection) {
+            String trimmed = item.trim();
+            if ("*".equals(trimmed)) {
+                if (select.tableName != null) {
+                    try {
+                        String realTable = resolveTableName(select.tableName);
+                        TableData baseTd = getOrLoadTable(realTable);
+                        if (baseTd != null) {
+                            for (String col : baseTd.columns) {
+                                if (isColumnVisible(realTable, col)) {
+                                    expanded.add(col);
+                                }
+                            }
+                        }
+                    } catch (Exception e) {}
+                    if (select.joins != null) {
+                        for (Clause.Join join : select.joins) {
+                            try {
+                                String realJoin = resolveTableName(join.table);
+                                TableData jtd = getOrLoadTable(realJoin);
+                                if (jtd != null) {
+                                    for (String col : jtd.columns) {
+                                        if (isColumnVisible(realJoin, col)) {
+                                            expanded.add(col);
+                                        }
+                                    }
+                                }
+                            } catch (Exception e) {}
+                        }
+                    }
+                } else {
+                    expanded.add(item);
+                }
+            } else if (trimmed.endsWith(".*")) {
+                String prefix = trimmed.substring(0, trimmed.length() - 2).trim();
+                String targetTable = prefix;
+                if (select.tableAliases != null && select.tableAliases.containsKey(prefix)) {
+                    targetTable = select.tableAliases.get(prefix);
+                }
+                TableData td = null;
+                try {
+                    String realTarget = resolveTableName(targetTable);
+                    td = getOrLoadTable(realTarget);
+                } catch (Exception e) {}
+                if (td != null) {
+                    for (String col : td.columns) {
+                        if (isColumnVisible(targetTable, col)) {
+                            expanded.add(col);
+                        }
+                    }
+                } else {
+                    expanded.add(item);
+                }
+            } else {
+                expanded.add(item);
+            }
+        }
+        return expanded;
     }
 
     private void validateColumnReferences(Command.Select select) throws Exception {
@@ -2531,7 +3224,19 @@ public class DatabaseEngine {
 
         // Collect from GROUP BY
         if (select.groupBy != null) {
-            referencedCols.add(select.groupBy.column);
+            List<String> gCols = select.groupBy.columns != null ? select.groupBy.columns : java.util.Collections.singletonList(select.groupBy.column);
+            for (String gCol : gCols) {
+                if (gCol != null && gCol.contains("(")) {
+                    try {
+                        SqlFunctions.Expression expr = SqlFunctions.parse(gCol);
+                        expr.collectColumns(referencedCols);
+                    } catch (Exception ignored) {
+                        referencedCols.add(gCol);
+                    }
+                } else if (gCol != null) {
+                    referencedCols.add(gCol);
+                }
+            }
         }
 
         // Collect from HAVING
@@ -2566,6 +3271,7 @@ public class DatabaseEngine {
 
         // 4. Validate referenced columns (which cannot be projection aliases)
         for (String col : referencedCols) {
+            if (col == null || col.trim().isEmpty()) continue;
             if (!isValidColumnReference(col, tableColumnsMap, allUnqualifiedColumns, localVariables)) {
                 throw new Exception("Unknown column '" + col + "' in 'field list'");
             }
@@ -2690,39 +3396,67 @@ public class DatabaseEngine {
 
 
     public QueryResult selectFrom(Command.Select select) throws Exception {
-        validateColumnReferences(select);
+        List<String> tempTablesCreated = new ArrayList<>();
+        try {
+            if (select.derivedTableQuery != null) {
+                QueryResult subRes = selectFrom(select.derivedTableQuery);
+                if (!subRes.success) {
+                    return subRes;
+                }
+                String dtName = select.derivedTableAlias != null ? select.derivedTableAlias : select.tableName;
+                if (dtName == null || dtName.isEmpty()) {
+                    dtName = "_derived_" + System.currentTimeMillis();
+                }
+                createTableFromQueryResult(dtName, subRes);
+                tempTablesCreated.add(dtName);
+            }
 
-        if (select.tableName != null) {
-            verifyPrivilege("SELECT", activeDatabaseName, select.tableName);
-        }
-
-        List<Map<String, Object>> joinedRows = new ArrayList<>();
-        if (select.tableName != null && !select.tableName.isEmpty()) {
-            TableData baseTd = getOrLoadTable(select.tableName);
-            String baseAlias = null;
-            if (select.tableAliases != null) {
-                for (Map.Entry<String, String> entry : select.tableAliases.entrySet()) {
-                    if (entry.getValue().equalsIgnoreCase(select.tableName)) {
-                        baseAlias = entry.getKey();
-                        break;
+            if (select.joins != null) {
+                for (Clause.Join join : select.joins) {
+                    if (join.derivedTableQuery != null) {
+                        QueryResult joinRes = selectFrom(join.derivedTableQuery);
+                        if (!joinRes.success) {
+                            return joinRes;
+                        }
+                        createTableFromQueryResult(join.table, joinRes);
+                        tempTablesCreated.add(join.table);
                     }
                 }
             }
-            for (Map<String, Object> row : baseTd.rows) {
-                Map<String, Object> newRow = new HashMap<>();
-                for (String col : baseTd.columns) {
-                    newRow.put(col, row.get(col));
-                    newRow.put(select.tableName + "." + col, row.get(col));
-                    if (baseAlias != null) {
-                        newRow.put(baseAlias + "." + col, row.get(col));
+
+            validateColumnReferences(select);
+
+            if (select.tableName != null) {
+                verifyPrivilege("SELECT", activeDatabaseName, select.tableName);
+            }
+
+            List<Map<String, Object>> joinedRows = new ArrayList<>();
+            if (select.tableName != null && !select.tableName.isEmpty()) {
+                TableData baseTd = getOrLoadTable(select.tableName);
+                String baseAlias = null;
+                if (select.tableAliases != null) {
+                    for (Map.Entry<String, String> entry : select.tableAliases.entrySet()) {
+                        if (entry.getValue().equalsIgnoreCase(select.tableName)) {
+                            baseAlias = entry.getKey();
+                            break;
+                        }
                     }
                 }
-                joinedRows.add(newRow);
+                for (Map<String, Object> row : baseTd.rows) {
+                    Map<String, Object> newRow = new HashMap<>();
+                    for (String col : baseTd.columns) {
+                        newRow.put(col, row.get(col));
+                        newRow.put(select.tableName + "." + col, row.get(col));
+                        if (baseAlias != null) {
+                            newRow.put(baseAlias + "." + col, row.get(col));
+                        }
+                    }
+                    joinedRows.add(newRow);
+                }
+            } else {
+                Map<String, Object> emptyRow = new HashMap<>();
+                joinedRows.add(emptyRow);
             }
-        } else {
-            Map<String, Object> emptyRow = new HashMap<>();
-            joinedRows.add(emptyRow);
-        }
 
         // 1. Process Joins
         if (select.joins != null) {
@@ -3048,10 +3782,20 @@ public class DatabaseEngine {
         if (select.groupBy != null || hasAggregate) {
             Map<Object, List<Map<String, Object>>> groups = new LinkedHashMap<>();
             if (select.groupBy != null) {
-                String groupCol = select.groupBy.column;
+                List<String> gCols = select.groupBy.columns != null ? select.groupBy.columns : java.util.Collections.singletonList(select.groupBy.column);
                 for (Map<String, Object> row : joinedRows) {
-                    Object key = getRowValue(row, groupCol);
-                    if (key == null) key = "NULL";
+                    Object key;
+                    if (gCols.size() == 1) {
+                        key = getRowValueOrEvaluate(row, gCols.get(0));
+                        if (key == null) key = "NULL";
+                    } else {
+                        List<Object> compositeKey = new ArrayList<>();
+                        for (String col : gCols) {
+                            Object val = getRowValueOrEvaluate(row, col);
+                            compositeKey.add(val == null ? "NULL" : val);
+                        }
+                        key = compositeKey;
+                    }
                     if (!groups.containsKey(key)) {
                         groups.put(key, new ArrayList<>());
                     }
@@ -3072,8 +3816,18 @@ public class DatabaseEngine {
 
                 if (select.projection != null) {
                     for (String projItem : select.projection) {
+                        List<int[]> aggMatches = findAggregateMatches(projItem);
+                        for (int[] m : aggMatches) {
+                            String aggExpr = projItem.substring(m[0], m[1]);
+                            aggRow.put(aggExpr, evaluateAggregate(aggExpr, groupRows));
+                        }
                         if (isAggregate(projItem)) {
-                            aggRow.put(projItem, evaluateAggregate(projItem, groupRows));
+                            Object aggVal = evaluateAggregate(projItem, groupRows);
+                            aggRow.put(projItem, aggVal);
+                            int asIdx = projItem.toUpperCase().lastIndexOf(" AS ");
+                            if (asIdx != -1) {
+                                aggRow.put(projItem.substring(0, asIdx).trim(), aggVal);
+                            }
                         }
                     }
                 }
@@ -3090,12 +3844,15 @@ public class DatabaseEngine {
         if (select.having != null) {
             List<Map<String, Object>> havingFiltered = new ArrayList<>();
             for (Map<String, Object> row : joinedRows) {
-                if (select.having.evaluate(row)) {
+                if (select.having.evaluate(row, this)) {
                     havingFiltered.add(row);
                 }
             }
             joinedRows = havingFiltered;
         }
+
+        // Window function evaluation
+        evaluateWindowFunctions(select, joinedRows);
 
         // 5. Sort
         if (select.orderBySpecs != null && !select.orderBySpecs.isEmpty()) {
@@ -3160,10 +3917,11 @@ public class DatabaseEngine {
         }
 
         // 6. Project columns & apply aliases
+        List<String> effectiveProjection = expandProjectionList(select);
         List<String> outColumns = new ArrayList<>();
         List<String> outTypes = new ArrayList<>();
 
-        if (select.projection == null) {
+        if (effectiveProjection == null) {
             if (select.tableName != null) {
                 TableData baseTd = getOrLoadTable(select.tableName);
                 if (select.joins == null || select.joins.isEmpty()) {
@@ -3195,7 +3953,7 @@ public class DatabaseEngine {
                 }
             }
         } else {
-            for (String col : select.projection) {
+            for (String col : effectiveProjection) {
                 String type = "TEXT";
                 if (isAggregate(col)) {
                     if (col.toUpperCase().startsWith("COUNT(")) {
@@ -3212,9 +3970,25 @@ public class DatabaseEngine {
                 }
 
                 String displayName = col;
-                if (select.aliases != null && select.aliases.containsKey(col)) {
-                    displayName = select.aliases.get(col);
+                String rawExpr = col;
+                int asIdx = col.toUpperCase().lastIndexOf(" AS ");
+                if (asIdx != -1) {
+                    displayName = col.substring(asIdx + 4).trim();
+                    rawExpr = col.substring(0, asIdx).trim();
+                } else if (select.aliases != null) {
+                    if (select.aliases.containsKey(col)) {
+                        displayName = select.aliases.get(col);
+                    } else {
+                        String cleanCol = col.replaceAll("\\s+", "");
+                        for (Map.Entry<String, String> e : select.aliases.entrySet()) {
+                            if (e.getKey() != null && e.getKey().replaceAll("\\s+", "").equalsIgnoreCase(cleanCol)) {
+                                displayName = e.getValue();
+                                break;
+                            }
+                        }
+                    }
                 }
+                displayName = getDisplayColumnName(displayName);
                 outColumns.add(displayName);
                 outTypes.add(type);
             }
@@ -3223,25 +3997,37 @@ public class DatabaseEngine {
         List<Map<String, Object>> projectedRows = new ArrayList<>();
         for (Map<String, Object> row : joinedRows) {
             Map<String, Object> projRow = new HashMap<>();
-            if (select.projection == null) {
+            if (effectiveProjection == null) {
                 for (String col : outColumns) {
-                    projRow.put(col, getRowValue(row, col));
+                    Object val = getRowValue(row, col);
+                    if (val == null) val = row.get(col);
+                    projRow.put(col, val);
                 }
             } else {
-                for (int i = 0; i < select.projection.size(); i++) {
-                    String col = select.projection.get(i);
+                for (int i = 0; i < effectiveProjection.size(); i++) {
+                    String col = effectiveProjection.get(i);
                     String displayName = outColumns.get(i);
+                    String rawExpr = col;
+                    int asIdx = col.toUpperCase().lastIndexOf(" AS ");
+                    if (asIdx != -1) {
+                        rawExpr = col.substring(0, asIdx).trim();
+                    }
 
-                    // First try a cheap direct key lookup
                     Object val = getRowValue(row, col);
+                    if (val == null) val = getRowValue(row, rawExpr);
+                    if (val == null) val = getRowValue(row, displayName);
+                    if (val == null) val = row.get(displayName);
+                    if (val == null) val = row.get(col);
+                    if (val == null) val = row.get(rawExpr);
 
-                    // If not found as a raw column, evaluate as an expression (handles functions,
-                    // arithmetic, CASE, literals, etc.)
-                    if (val == null && !row.containsKey(col)) {
-                        val = SqlFunctions.evaluate(col, row, this);
+                    if (val == null && !row.containsKey(col) && !row.containsKey(rawExpr) && !row.containsKey(displayName)) {
+                        val = SqlFunctions.evaluate(rawExpr, row, this);
                     }
 
                     projRow.put(displayName, val);
+                    if (col != null && !col.equals(displayName)) {
+                        projRow.put(col, val);
+                    }
                 }
             }
             projectedRows.add(projRow);
@@ -3328,6 +4114,13 @@ public class DatabaseEngine {
         }
 
         return QueryResult.createSelectSuccess(outColumns, outTypes, projectedRows, 0);
+        } finally {
+            for (String tmp : tempTablesCreated) {
+                try {
+                    dropTable(tmp, true);
+                } catch (Exception ignored) {}
+            }
+        }
     }
 
     public QueryResult updateTable(String tableName, Map<String, Object> updates, Clause.Where where) throws Exception {
@@ -3462,31 +4255,42 @@ public class DatabaseEngine {
     }
 
     private void validateSingleWhereColumn(String colExpr, List<String> validColumns) throws Exception {
-        if (colExpr == null || colExpr.startsWith("@") || colExpr.contains("(")) {
+        if (colExpr == null || colExpr.startsWith("@")) {
             return;
         }
-        String cleanCol = colExpr;
-        int lastDot = cleanCol.lastIndexOf('.');
-        if (lastDot != -1) {
-            cleanCol = cleanCol.substring(lastDot + 1);
+        List<String> extractedCols = new ArrayList<>();
+        try {
+            SqlFunctions.Expression expr = SqlFunctions.parse(colExpr);
+            expr.collectColumns(extractedCols);
+        } catch (Exception e) {
+            extractedCols.add(colExpr);
         }
-        cleanCol = cleanCol.trim();
-        if (cleanCol.isEmpty() || "*".equals(cleanCol)) return;
 
-        boolean found = false;
-        for (String valid : validColumns) {
-            String cleanValid = valid;
-            int dotIdx = cleanValid.lastIndexOf('.');
-            if (dotIdx != -1) {
-                cleanValid = cleanValid.substring(dotIdx + 1);
+        for (String col : extractedCols) {
+            if (col.startsWith("@") || "*".equals(col)) continue;
+            String cleanCol = col;
+            int lastDot = cleanCol.lastIndexOf('.');
+            if (lastDot != -1) {
+                cleanCol = cleanCol.substring(lastDot + 1);
             }
-            if (cleanValid.equalsIgnoreCase(cleanCol)) {
-                found = true;
-                break;
+            cleanCol = cleanCol.trim();
+            if (cleanCol.isEmpty()) continue;
+
+            boolean found = false;
+            for (String valid : validColumns) {
+                String cleanValid = valid;
+                int dotIdx = cleanValid.lastIndexOf('.');
+                if (dotIdx != -1) {
+                    cleanValid = cleanValid.substring(dotIdx + 1);
+                }
+                if (cleanValid.equalsIgnoreCase(cleanCol)) {
+                    found = true;
+                    break;
+                }
             }
-        }
-        if (!found) {
-            throw new Exception("ERROR 1054 (42S22): Unknown column '" + colExpr + "' in 'where clause'");
+            if (!found) {
+                throw new Exception("ERROR 1054 (42S22): Unknown column '" + colExpr + "' in 'where clause'");
+            }
         }
     }
 
@@ -3969,26 +4773,68 @@ public class DatabaseEngine {
                 }
             }
         } else if ("ADD_PRIMARY_KEY".equals(cmd.operation)) {
-            JSONArray pkArr = new JSONArray();
-            JSONObject keys = tableSchema.optJSONObject("keys");
-            for (String col : cmd.columnsList) {
-                pkArr.put(col);
-                if (keys != null) {
-                    keys.put(col, "PRI");
-                }
+            JSONArray existingPk = tableSchema.optJSONArray("primary_key");
+            if (existingPk != null && existingPk.length() > 0) {
+                throw new Exception("Error: Multiple primary key defined");
             }
-            tableSchema.put("primary_key", pkArr);
-        } else if ("DROP_PRIMARY_KEY".equals(cmd.operation)) {
-            JSONArray pkArr = tableSchema.optJSONArray("primary_key");
-            if (pkArr != null) {
-                JSONObject keys = tableSchema.optJSONObject("keys");
-                for (int i = 0; i < pkArr.length(); i++) {
-                    String col = pkArr.getString(i);
-                    if (keys != null && "PRI".equals(keys.optString(col))) {
-                        keys.put(col, "");
+            List<String> resolvedCols = new ArrayList<>();
+            for (String rawCol : cmd.columnsList) {
+                String match = null;
+                for (int cIdx = 0; cIdx < colsArr.length(); cIdx++) {
+                    if (colsArr.getString(cIdx).equalsIgnoreCase(rawCol)) {
+                        match = colsArr.getString(cIdx);
+                        break;
                     }
                 }
-                tableSchema.remove("primary_key");
+                if (match == null) {
+                    throw new Exception("Error: Key column '" + rawCol + "' doesn't exist in table");
+                }
+                resolvedCols.add(match);
+            }
+            JSONArray pkArr = new JSONArray();
+            JSONObject keys = tableSchema.optJSONObject("keys");
+            if (keys == null) {
+                keys = new JSONObject();
+                tableSchema.put("keys", keys);
+            }
+            JSONObject nullables = tableSchema.optJSONObject("nullables");
+            if (nullables == null) {
+                nullables = new JSONObject();
+                tableSchema.put("nullables", nullables);
+            }
+            for (String col : resolvedCols) {
+                pkArr.put(col);
+                keys.put(col, "PRI");
+                nullables.put(col, false);
+            }
+            tableSchema.put("primary_key", pkArr);
+            JSONObject indexesObj = tableSchema.optJSONObject("indexes");
+            if (indexesObj == null) {
+                indexesObj = new JSONObject();
+                tableSchema.put("indexes", indexesObj);
+            }
+            JSONObject idxMeta = new JSONObject();
+            idxMeta.put("name", "PRIMARY");
+            idxMeta.put("columns", pkArr);
+            idxMeta.put("unique", true);
+            idxMeta.put("type", "BTREE");
+            indexesObj.put("PRIMARY", idxMeta);
+        } else if ("DROP_PRIMARY_KEY".equals(cmd.operation)) {
+            JSONArray pkArr = tableSchema.optJSONArray("primary_key");
+            if (pkArr == null || pkArr.length() == 0) {
+                throw new Exception("Error: Can't DROP 'PRIMARY'; check that column/key exists");
+            }
+            JSONObject keys = tableSchema.optJSONObject("keys");
+            for (int i = 0; i < pkArr.length(); i++) {
+                String col = pkArr.getString(i);
+                if (keys != null && "PRI".equals(keys.optString(col))) {
+                    keys.put(col, "");
+                }
+            }
+            tableSchema.remove("primary_key");
+            JSONObject indexesObj = tableSchema.optJSONObject("indexes");
+            if (indexesObj != null) {
+                indexesObj.remove("PRIMARY");
             }
         } else if ("ADD_FOREIGN_KEY".equals(cmd.operation)) {
             JSONObject fks = tableSchema.optJSONObject("foreign_keys");
@@ -3997,17 +4843,59 @@ public class DatabaseEngine {
                 tableSchema.put("foreign_keys", fks);
             }
             for (int i = 0; i < cmd.columnsList.size(); i++) {
-                String childCol = cmd.columnsList.get(i);
+                String rawChildCol = cmd.columnsList.get(i);
+                String childCol = null;
+                for (int cIdx = 0; cIdx < colsArr.length(); cIdx++) {
+                    if (colsArr.getString(cIdx).equalsIgnoreCase(rawChildCol)) {
+                        childCol = colsArr.getString(cIdx);
+                        break;
+                    }
+                }
+                if (childCol == null) {
+                    throw new Exception("Error: Key column '" + rawChildCol + "' doesn't exist in table");
+                }
                 String parentCol = cmd.referenceColumns.get(i);
                 fks.put(childCol, cmd.referenceTable + "." + parentCol);
             }
         } else if ("DROP_FOREIGN_KEY".equals(cmd.operation)) {
             JSONObject fks = tableSchema.optJSONObject("foreign_keys");
-            if (fks != null) {
-                fks.remove(cmd.constraintName);
+            if (fks == null || !fks.has(cmd.constraintName)) {
+                throw new Exception("Error: Foreign key '" + cmd.constraintName + "' does not exist");
             }
+            fks.remove(cmd.constraintName);
         } else if ("ADD_UNIQUE".equals(cmd.operation) || "ADD_INDEX".equals(cmd.operation)) {
             boolean isUnique = "ADD_UNIQUE".equals(cmd.operation);
+            List<String> resolvedCols = new ArrayList<>();
+            for (String rawCol : cmd.columnsList) {
+                String match = null;
+                for (int cIdx = 0; cIdx < colsArr.length(); cIdx++) {
+                    if (colsArr.getString(cIdx).equalsIgnoreCase(rawCol)) {
+                        match = colsArr.getString(cIdx);
+                        break;
+                    }
+                }
+                if (match == null) {
+                    throw new Exception("Error: Key column '" + rawCol + "' doesn't exist in table");
+                }
+                resolvedCols.add(match);
+            }
+            JSONObject indexesObj = tableSchema.optJSONObject("indexes");
+            if (indexesObj == null) {
+                indexesObj = new JSONObject();
+                tableSchema.put("indexes", indexesObj);
+            }
+
+            String idxName = cmd.constraintName;
+            if (idxName == null) {
+                idxName = isUnique ? "uq_" + String.join("_", resolvedCols) : "idx_" + (resolvedCols.isEmpty() ? "col" : resolvedCols.get(0));
+            }
+            Iterator<String> iks = indexesObj.keys();
+            while (iks.hasNext()) {
+                if (iks.next().equalsIgnoreCase(idxName)) {
+                    throw new Exception("Error: Duplicate key name '" + idxName + "'");
+                }
+            }
+
             if (isUnique) {
                 JSONArray uniques = tableSchema.optJSONArray("uniques");
                 if (uniques == null) {
@@ -4016,40 +4904,40 @@ public class DatabaseEngine {
                 }
                 JSONArray group = new JSONArray();
                 JSONObject keys = tableSchema.optJSONObject("keys");
-                for (String col : cmd.columnsList) {
+                if (keys == null) {
+                    keys = new JSONObject();
+                    tableSchema.put("keys", keys);
+                }
+                for (String col : resolvedCols) {
                     group.put(col);
-                    if (keys != null && "".equals(keys.optString(col))) {
-                        keys.put(col, "UNI");
-                    }
+                    keys.put(col, "UNI");
                 }
                 uniques.put(group);
             }
-            String idxName = cmd.constraintName;
-            if (idxName == null) {
-                if (isUnique && !cmd.columnsList.isEmpty()) {
-                    idxName = "uq_" + String.join("_", cmd.columnsList);
-                } else if (!cmd.columnsList.isEmpty()) {
-                    idxName = "idx_" + cmd.columnsList.get(0);
-                }
-            }
-            if (idxName != null) {
-                JSONObject indexesObj = tableSchema.optJSONObject("indexes");
-                if (indexesObj == null) {
-                    indexesObj = new JSONObject();
-                    tableSchema.put("indexes", indexesObj);
-                }
-                JSONObject indexMeta = new JSONObject();
-                indexMeta.put("name", idxName);
-                indexMeta.put("columns", new JSONArray(cmd.columnsList));
-                indexMeta.put("unique", isUnique);
-                indexMeta.put("type", cmd.indexType != null ? cmd.indexType : "BTREE");
-                indexesObj.put(idxName, indexMeta);
-            }
+
+            JSONObject indexMeta = new JSONObject();
+            indexMeta.put("name", idxName);
+            indexMeta.put("columns", new JSONArray(resolvedCols));
+            indexMeta.put("unique", isUnique);
+            indexMeta.put("type", cmd.indexType != null ? cmd.indexType : "BTREE");
+            indexesObj.put(idxName, indexMeta);
         } else if ("DROP_INDEX".equals(cmd.operation)) {
             JSONArray uniques = tableSchema.optJSONArray("uniques");
             JSONObject indexesObj = tableSchema.optJSONObject("indexes");
-            if (indexesObj != null && indexesObj.has(cmd.constraintName)) {
-                JSONObject idxMeta = indexesObj.getJSONObject(cmd.constraintName);
+            boolean dropped = false;
+            String matchedIndexName = null;
+            if (indexesObj != null) {
+                Iterator<String> iks = indexesObj.keys();
+                while (iks.hasNext()) {
+                    String k = iks.next();
+                    if (k.equalsIgnoreCase(cmd.constraintName)) {
+                        matchedIndexName = k;
+                        break;
+                    }
+                }
+            }
+            if (indexesObj != null && matchedIndexName != null) {
+                JSONObject idxMeta = indexesObj.getJSONObject(matchedIndexName);
                 JSONArray cols = idxMeta.optJSONArray("columns");
                 if (cols != null && uniques != null) {
                     for (int i = uniques.length() - 1; i >= 0; i--) {
@@ -4074,7 +4962,8 @@ public class DatabaseEngine {
                         }
                     }
                 }
-                indexesObj.remove(cmd.constraintName);
+                indexesObj.remove(matchedIndexName);
+                dropped = true;
             } else {
                 if (uniques != null) {
                     for (int i = uniques.length() - 1; i >= 0; i--) {
@@ -4097,9 +4986,13 @@ public class DatabaseEngine {
                                 }
                             }
                             uniques.remove(i);
+                            dropped = true;
                         }
                     }
                 }
+            }
+            if (!dropped) {
+                throw new Exception("Error: Index '" + cmd.constraintName + "' does not exist");
             }
         } else if ("DEFAULT_VALUE_CHANGE".equals(cmd.operation)) {
             JSONObject defaults = tableSchema.optJSONObject("defaults");
@@ -4165,23 +5058,42 @@ public class DatabaseEngine {
                 checks = new JSONArray();
                 tableSchema.put("checks", checks);
             }
-            checks.put(new JSONObject(cmd.checkConstraint));
+            JSONObject chkObj = new JSONObject(cmd.checkConstraint);
+            if (cmd.constraintName != null) {
+                chkObj.put("name", cmd.constraintName);
+            }
+            checks.put(chkObj);
         } else if ("DROP_CHECK".equals(cmd.operation)) {
             JSONArray checks = tableSchema.optJSONArray("checks");
+            boolean removed = false;
             if (checks != null) {
-                String name = cmd.constraintName.toLowerCase();
-                int lastUnderscore = name.lastIndexOf('_');
-                if (lastUnderscore != -1) {
-                    try {
-                        int index = Integer.parseInt(name.substring(lastUnderscore + 1)) - 1;
-                        if (index >= 0 && index < checks.length()) {
-                            checks.remove(index);
-                        }
-                    } catch (NumberFormatException e) {
-                        // ignore
+                for (int i = checks.length() - 1; i >= 0; i--) {
+                    JSONObject chk = checks.getJSONObject(i);
+                    if (chk.optString("name").equalsIgnoreCase(cmd.constraintName)) {
+                        checks.remove(i);
+                        removed = true;
+                        break;
+                    }
+                }
+                if (!removed) {
+                    String name = cmd.constraintName.toLowerCase();
+                    int lastUnderscore = name.lastIndexOf('_');
+                    if (lastUnderscore != -1) {
+                        try {
+                            int index = Integer.parseInt(name.substring(lastUnderscore + 1)) - 1;
+                            if (index >= 0 && index < checks.length()) {
+                                checks.remove(index);
+                                removed = true;
+                            }
+                        } catch (NumberFormatException ignored) {}
                     }
                 }
             }
+            if (!removed) {
+                throw new Exception("Error: Constraint '" + cmd.constraintName + "' does not exist");
+            }
+        } else if ("AUTO_INCREMENT".equals(cmd.operation)) {
+            tableSchema.put("auto_increment", cmd.autoIncrementValue);
         }
 
         storageEngine.writeSchema(activeDatabaseName, activeSchemaJson);
@@ -4511,6 +5423,20 @@ public class DatabaseEngine {
                 String tableName = tbls.next();
                 if (tableName.startsWith("__")) continue;
                 JSONObject tableSchema = activeSchemaJson.getJSONObject(tableName);
+                JSONArray pk = tableSchema.optJSONArray("primary_key");
+                if (pk != null && pk.length() > 0) {
+                    if (!list.contains("PRIMARY")) list.add("PRIMARY");
+                }
+                JSONArray uniques = tableSchema.optJSONArray("uniques");
+                if (uniques != null) {
+                    for (int i = 0; i < uniques.length(); i++) {
+                        JSONArray grp = uniques.getJSONArray(i);
+                        if (grp.length() > 0) {
+                            String uqName = "uq_" + grp.getString(0);
+                            if (!list.contains(uqName)) list.add(uqName);
+                        }
+                    }
+                }
                 JSONObject indexesObj = tableSchema.optJSONObject("indexes");
                 if (indexesObj != null) {
                     Iterator<String> idxNames = indexesObj.keys();
@@ -4889,24 +5815,50 @@ public class DatabaseEngine {
             constraintLines.add(pkSb.toString());
         }
         
-        JSONArray uniquesArr = tableSchema.optJSONArray("uniques");
-        if (uniquesArr != null && uniquesArr.length() > 0) {
-            for (int i = 0; i < uniquesArr.length(); i++) {
-                JSONArray group = uniquesArr.getJSONArray(i);
-                StringBuilder uniqSb = new StringBuilder();
-                uniqSb.append("  UNIQUE KEY `");
-                StringBuilder nameSb = new StringBuilder();
-                for (int j = 0; j < group.length(); j++) {
-                    if (j > 0) nameSb.append("_");
-                    nameSb.append(group.getString(j));
+        JSONObject indexesObj = tableSchema.optJSONObject("indexes");
+        if (indexesObj != null && indexesObj.length() > 0) {
+            Iterator<String> iks = indexesObj.keys();
+            while (iks.hasNext()) {
+                String idxName = iks.next();
+                if ("PRIMARY".equalsIgnoreCase(idxName)) continue;
+                JSONObject idxMeta = indexesObj.optJSONObject(idxName);
+                if (idxMeta == null) continue;
+                JSONArray cols = idxMeta.optJSONArray("columns");
+                if (cols == null) continue;
+                boolean isUnique = idxMeta.optBoolean("unique", false);
+                StringBuilder idxSb = new StringBuilder();
+                if (isUnique) {
+                    idxSb.append("  UNIQUE KEY `").append(idxName).append("` (");
+                } else {
+                    idxSb.append("  KEY `").append(idxName).append("` (");
                 }
-                uniqSb.append(nameSb.toString()).append("` (");
-                for (int j = 0; j < group.length(); j++) {
-                    if (j > 0) uniqSb.append(",");
-                    uniqSb.append("`").append(group.getString(j)).append("`");
+                for (int j = 0; j < cols.length(); j++) {
+                    if (j > 0) idxSb.append(",");
+                    idxSb.append("`").append(cols.getString(j)).append("`");
                 }
-                uniqSb.append(")");
-                constraintLines.add(uniqSb.toString());
+                idxSb.append(")");
+                constraintLines.add(idxSb.toString());
+            }
+        } else {
+            JSONArray uniquesArr = tableSchema.optJSONArray("uniques");
+            if (uniquesArr != null && uniquesArr.length() > 0) {
+                for (int i = 0; i < uniquesArr.length(); i++) {
+                    JSONArray group = uniquesArr.getJSONArray(i);
+                    StringBuilder uniqSb = new StringBuilder();
+                    uniqSb.append("  UNIQUE KEY `");
+                    StringBuilder nameSb = new StringBuilder();
+                    for (int j = 0; j < group.length(); j++) {
+                        if (j > 0) nameSb.append("_");
+                        nameSb.append(group.getString(j));
+                    }
+                    uniqSb.append(nameSb.toString()).append("` (");
+                    for (int j = 0; j < group.length(); j++) {
+                        if (j > 0) uniqSb.append(",");
+                        uniqSb.append("`").append(group.getString(j)).append("`");
+                    }
+                    uniqSb.append(")");
+                    constraintLines.add(uniqSb.toString());
+                }
             }
         }
         

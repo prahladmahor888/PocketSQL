@@ -57,8 +57,8 @@ public class SqlKeywordSuggester {
         // Stored Programs
         "CALL", "PROCEDURE", "FUNCTION", "TRIGGER", "EVENT",
 
-        // Built-in SQL Functions (String)
-        "CONCAT()", "CONCAT_WS()", "UPPER()", "LOWER()", "LENGTH()", "CHAR_LENGTH()", "SUBSTRING()", "SUBSTR()",
+        // Built-in SQL Functions (String & Formatting)
+        "CONCAT()", "CONCAT_WS()", "FORMAT()", "UPPER()", "LOWER()", "LENGTH()", "CHAR_LENGTH()", "SUBSTRING()", "SUBSTR()",
         "LEFT()", "RIGHT()", "TRIM()", "LTRIM()", "RTRIM()", "REPLACE()", "REVERSE()", "INSTR()", "LOCATE()", "LPAD()", "RPAD()", "REPEAT()",
         
         // Built-in SQL Functions (Numeric)
@@ -66,7 +66,7 @@ public class SqlKeywordSuggester {
         
         // Built-in SQL Functions (Date & Time)
         "NOW()", "CURDATE()", "CURRENT_DATE()", "CURTIME()", "CURRENT_TIME()", "DATE()", "TIME()", "YEAR()", "MONTH()", "DAY()", "DAYOFMONTH()",
-        "HOUR()", "MINUTE()", "SECOND()", "DATEDIFF()", "DATE_ADD()", "DATE_SUB()", "TIMESTAMPDIFF()",
+        "HOUR()", "MINUTE()", "SECOND()", "DATEDIFF()", "DATE_ADD()", "DATE_SUB()", "DATE_FORMAT()", "TIMESTAMPDIFF()",
         
         // Built-in SQL Functions (Conditional & Conversion)
         "IF()", "IFNULL()", "NULLIF()", "COALESCE()", "CAST()", "CONVERT()", "BINARY()",
