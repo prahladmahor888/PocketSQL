@@ -43,7 +43,6 @@ android {
                 storePassword = keystorePass
                 keyAlias      = keyAliasVal
                 keyPassword   = keyPassVal
-                storeType     = "JKS"  // explicit JKS avoids PKCS12 ASN.1 compat issues
                 enableV2Signing = true
                 enableV3Signing = true
                 enableV4Signing = true

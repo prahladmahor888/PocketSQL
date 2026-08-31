@@ -60,12 +60,39 @@ jobs:
       - name: Grant execute permission for gradlew
         run: chmod +x gradlew
 
-      - name: Decode keystore from secret
+      # Step 1: Decode the original PKCS12 keystore from the base64 secret
+      - name: Decode PKCS12 keystore
         env:
           KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
         run: |
-          echo "$KEYSTORE_BASE64" | base64 --decode > ${{ github.workspace }}/app/release.jks
+          echo "$KEYSTORE_BASE64" | base64 --decode > /tmp/original.p12
+          echo "Decoded PKCS12 size: $(wc -c < /tmp/original.p12) bytes"
+
+      # Step 2: Convert PKCS12 → JKS (fixes 'Tag number over 30' ASN.1 error
+      #         caused by newer PKCS12 encryption that older BouncyCastle can't parse)
+      - name: Convert PKCS12 to JKS
+        run: |
+          keytool -importkeystore \
+            -srckeystore /tmp/original.p12 \
+            -srcstoretype PKCS12 \
+            -srcstorepass "$KEYSTORE_PASSWORD" \
+            -srckeypass "$KEY_PASSWORD" \
+            -srcalias "$KEY_ALIAS" \
+            -destkeystore "${{ github.workspace }}/app/release.jks" \
+            -deststoretype JKS \
+            -deststorepass "$KEYSTORE_PASSWORD" \
+            -destkeypass "$KEY_PASSWORD" \
+            -destalias "$KEY_ALIAS" \
+            -noprompt
           echo "KEYSTORE_FILE=${{ github.workspace }}/app/release.jks" >> $GITHUB_ENV
+
+      # Step 3: Verify the JKS contents (shows alias names for debugging)
+      - name: Verify JKS keystore
+        run: |
+          echo "=== Keystore contents ==="
+          keytool -list -keystore "$KEYSTORE_FILE" -storepass "$KEYSTORE_PASSWORD" -v 2>&1 | grep -E "Alias|Entry type|Keystore type|contains" || true
+          echo "=== KEYSTORE_FILE: $KEYSTORE_FILE ==="
+          echo "=== KEY_ALIAS: $KEY_ALIAS ==="
 
       - name: Build signed release APK
         run: ./gradlew assembleRelease --no-daemon
@@ -76,3 +103,4 @@ jobs:
           name: release-apk-signed
           path: app/build/outputs/apk/release/*.apk
           retention-days: 14
+
