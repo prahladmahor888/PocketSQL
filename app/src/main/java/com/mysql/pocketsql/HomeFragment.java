@@ -348,9 +348,11 @@ public class HomeFragment extends Fragment {
         }
         etCommandInput.setInputType(inputType);
         if (!isPassword) {
-            etCommandInput.setImeOptions(android.view.inputmethod.EditorInfo.IME_ACTION_SEND);
             etCommandInput.setSingleLine(false);
             etCommandInput.setHorizontallyScrolling(false);
+            // setImeOptions MUST come after setSingleLine(false) —
+            // setSingleLine() internally resets imeOptions to IME_ACTION_UNSPECIFIED.
+            etCommandInput.setImeOptions(android.view.inputmethod.EditorInfo.IME_ACTION_SEND);
         }
         if (getContext() != null && settings != null) {
             etCommandInput.setTypeface(settings.getTypeface(requireContext()));
