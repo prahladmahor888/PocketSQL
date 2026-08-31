@@ -27,14 +27,27 @@ android {
 
     signingConfigs {
         create("release") {
-            storeFile = file("pocketsqlkey")
-            val pass = charArrayOf('R', 'a', 'd', 'h', 'a', 'R', 'a', 'n', 'i', '@', '1', '2', '3').concatToString()
-            storePassword = pass
-            keyAlias = "key0"
-            keyPassword = pass
-            enableV2Signing = true
-            enableV3Signing = true
-            enableV4Signing = true
+            // Credentials are injected via GitHub Secrets (or local env vars).
+            // Required env vars:
+            //   KEYSTORE_FILE      - absolute path to the JKS keystore file
+            //   KEYSTORE_PASSWORD  - keystore/store password
+            //   KEY_ALIAS          - key alias (key0)
+            //   KEY_PASSWORD       - key password
+            val keystorePath = System.getenv("KEYSTORE_FILE")
+            val keystorePass = System.getenv("KEYSTORE_PASSWORD")
+            val keyAliasVal  = System.getenv("KEY_ALIAS")
+            val keyPassVal   = System.getenv("KEY_PASSWORD")
+
+            if (keystorePath != null && keystorePass != null && keyAliasVal != null && keyPassVal != null) {
+                storeFile     = file(keystorePath)
+                storePassword = keystorePass
+                keyAlias      = keyAliasVal
+                keyPassword   = keyPassVal
+                storeType     = "JKS"  // explicit JKS avoids PKCS12 ASN.1 compat issues
+                enableV2Signing = true
+                enableV3Signing = true
+                enableV4Signing = true
+            }
         }
     }
 
