@@ -22,7 +22,7 @@ public class SqlKeywordSuggester {
         // Show & Admin Commands
         "SHOW", "DATABASES", "TABLES", "COLUMNS", "FIELDS", "STATUS", "PROCESSLIST", "ERRORS",
         "WARNINGS", "VARIABLES", "SCHEMAS", "GRANTS", "ENGINES", "PLUGINS", "TRIGGERS", "EVENTS",
-        "EXPORT", "IMPORT", "FULLTEXT", "SPATIAL", "CHARACTER",
+        "EXPORT", "IMPORT", "FULLTEXT", "SPATIAL", "CHARACTER", "PRAGMA",
         
         // Join Types & Modifiers
         "JOIN", "INNER", "LEFT", "RIGHT", "CROSS", "FULL", "OUTER", "NATURAL", "ON", "USING",

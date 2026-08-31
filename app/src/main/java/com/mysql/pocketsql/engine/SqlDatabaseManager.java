@@ -98,14 +98,26 @@ public class SqlDatabaseManager {
     }
 
     public QueryResult showDatabases() throws Exception {
+        return showDatabases(null, null);
+    }
+
+    public QueryResult showDatabases(String likePattern, Clause.Where where) throws Exception {
         if (engine.currentUser == null) {
             throw new Exception("Error: Access denied; you need (at least one of) the USAGE privilege(s) for this operation");
         }
         List<String> dbs = engine.storageEngine.listDatabases();
         List<Map<String, Object>> rows = new ArrayList<>();
         for (String db : dbs) {
+            if (likePattern != null && !likePattern.trim().isEmpty()) {
+                if (!matchesLike(db, likePattern.trim())) {
+                    continue;
+                }
+            }
             Map<String, Object> row = new HashMap<>();
             row.put("Database", db);
+            if (where != null && !where.evaluate(row, "utf8mb4_general_ci", engine)) {
+                continue;
+            }
             rows.add(row);
         }
         return QueryResult.createSelectSuccess(
@@ -114,5 +126,27 @@ public class SqlDatabaseManager {
             rows,
             0
         );
+    }
+
+    private boolean matchesLike(String text, String pattern) {
+        if (text == null || pattern == null) return false;
+        String regex = pattern
+            .replace("\\", "\\\\")
+            .replace(".", "\\.")
+            .replace("+", "\\+")
+            .replace("*", "\\*")
+            .replace("?", "\\?")
+            .replace("^", "\\^")
+            .replace("$", "\\$")
+            .replace("(", "\\(")
+            .replace(")", "\\)")
+            .replace("[", "\\[")
+            .replace("]", "\\]")
+            .replace("{", "\\{")
+            .replace("}", "\\}")
+            .replace("|", "\\|")
+            .replace("%", ".*")
+            .replace("_", ".");
+        return text.matches("(?i)" + regex);
     }
 }

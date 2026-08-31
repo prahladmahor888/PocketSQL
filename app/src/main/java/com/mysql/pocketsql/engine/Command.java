@@ -338,9 +338,21 @@ public interface Command {
     }
 
     class ShowDatabases implements Command {
+        public final String likePattern;
+        public final Clause.Where where;
+
+        public ShowDatabases() {
+            this(null, null);
+        }
+
+        public ShowDatabases(String likePattern, Clause.Where where) {
+            this.likePattern = likePattern;
+            this.where = where;
+        }
+
         @Override
         public QueryResult execute(DatabaseEngine engine) throws Exception {
-            return engine.showDatabases();
+            return engine.showDatabases(likePattern, where);
         }
     }
 
@@ -1154,6 +1166,85 @@ public interface Command {
         @Override
         public QueryResult execute(DatabaseEngine engine) throws Exception {
             return engine.dropUser(username, host, ifExists);
+        }
+    }
+
+    class ShowVariables implements Command {
+        public final String likePattern;
+        public final Clause.Where where;
+
+        public ShowVariables(String likePattern, Clause.Where where) {
+            this.likePattern = likePattern;
+            this.where = where;
+        }
+
+        @Override
+        public QueryResult execute(DatabaseEngine engine) throws Exception {
+            return engine.showVariables(likePattern, where);
+        }
+    }
+
+    class ShowStatus implements Command {
+        public final String likePattern;
+        public final Clause.Where where;
+
+        public ShowStatus(String likePattern, Clause.Where where) {
+            this.likePattern = likePattern;
+            this.where = where;
+        }
+
+        @Override
+        public QueryResult execute(DatabaseEngine engine) throws Exception {
+            return engine.showStatus(likePattern, where);
+        }
+    }
+
+    class ShowWarnings implements Command {
+        @Override
+        public QueryResult execute(DatabaseEngine engine) throws Exception {
+            return engine.showWarnings();
+        }
+    }
+
+    class ShowErrors implements Command {
+        @Override
+        public QueryResult execute(DatabaseEngine engine) throws Exception {
+            return engine.showErrors();
+        }
+    }
+
+    class ShowProcesslist implements Command {
+        @Override
+        public QueryResult execute(DatabaseEngine engine) throws Exception {
+            return engine.showProcesslist();
+        }
+    }
+
+    class ShowGrants implements Command {
+        public final String userHost;
+
+        public ShowGrants(String userHost) {
+            this.userHost = userHost;
+        }
+
+        @Override
+        public QueryResult execute(DatabaseEngine engine) throws Exception {
+            return engine.showGrants(userHost);
+        }
+    }
+
+    class Pragma implements Command {
+        public final String pragmaName;
+        public final String arg;
+
+        public Pragma(String pragmaName, String arg) {
+            this.pragmaName = pragmaName;
+            this.arg = arg;
+        }
+
+        @Override
+        public QueryResult execute(DatabaseEngine engine) throws Exception {
+            return engine.pragma(pragmaName, arg);
         }
     }
 }

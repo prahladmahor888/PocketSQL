@@ -220,6 +220,9 @@ public class SqlParser {
                 case "IMPORT":
                     cmd = parseImport();
                     break;
+                case "PRAGMA":
+                    cmd = parsePragma();
+                    break;
                 default:
                     throw new SqlSyntaxException("Unsupported SQL command keyword '" + t.value + "'", t.position);
             }
@@ -235,6 +238,40 @@ public class SqlParser {
         }
 
         return cmd;
+    }
+
+    private Command parsePragma() throws SqlSyntaxException {
+        consume(); // PRAGMA
+
+        SqlToken nameTok = peek();
+        if (nameTok.type != SqlToken.Type.IDENTIFIER && nameTok.type != SqlToken.Type.KEYWORD) {
+            throw new SqlSyntaxException("Expected PRAGMA name after PRAGMA", nameTok.position);
+        }
+        String pragmaName = nameTok.value;
+        consume();
+
+        String arg = null;
+        if (matchSymbol("(")) {
+            SqlToken argTok = peek();
+            if (argTok.type == SqlToken.Type.IDENTIFIER || argTok.type == SqlToken.Type.KEYWORD || argTok.type == SqlToken.Type.STRING || argTok.type == SqlToken.Type.NUMBER) {
+                arg = argTok.value;
+                consume();
+            }
+            matchSymbol(")");
+        } else if (matchSymbol("=")) {
+            SqlToken valTok = peek();
+            if (valTok.type == SqlToken.Type.IDENTIFIER || valTok.type == SqlToken.Type.KEYWORD || valTok.type == SqlToken.Type.STRING || valTok.type == SqlToken.Type.NUMBER) {
+                arg = valTok.value;
+                consume();
+            }
+        } else {
+            SqlToken nextTok = peek();
+            if (nextTok.type == SqlToken.Type.IDENTIFIER || nextTok.type == SqlToken.Type.KEYWORD || nextTok.type == SqlToken.Type.STRING || nextTok.type == SqlToken.Type.NUMBER) {
+                arg = nextTok.value;
+                consume();
+            }
+        }
+        return new Command.Pragma(pragmaName, arg);
     }
 
     private Command parseSet() throws SqlSyntaxException {
@@ -1024,8 +1061,19 @@ public class SqlParser {
             full = true;
         }
         
-        if (matchKeyword("DATABASES")) {
-            return new Command.ShowDatabases();
+        if (matchKeyword("DATABASES") || matchName("DATABASES") || matchKeyword("SCHEMAS") || matchName("SCHEMAS")) {
+            String likePattern = null;
+            if (matchKeyword("LIKE") || matchName("LIKE")) {
+                SqlToken patTok = peek();
+                if (patTok.type == SqlToken.Type.STRING || patTok.type == SqlToken.Type.IDENTIFIER) {
+                    likePattern = patTok.value;
+                    consume();
+                } else {
+                    throw new SqlSyntaxException("Expected pattern string after LIKE", patTok.position);
+                }
+            }
+            Clause.Where where = parseOptionalWhere();
+            return new Command.ShowDatabases(likePattern, where);
         } else if (matchKeyword("TABLES") || matchKeyword("TABLE") || matchName("TABLE")) {
             boolean isStatus = false;
             if (matchKeyword("STATUS") || matchName("STATUS")) {
@@ -1131,8 +1179,81 @@ public class SqlParser {
             } else {
                 throw new SqlSyntaxException("Expected 'DATABASE', 'TABLE', 'VIEW', 'PROCEDURE', or 'FUNCTION' after 'SHOW CREATE'", peek().position);
             }
+        } else if (matchName("VARIABLES") || matchKeyword("VARIABLES")) {
+            String pattern = null;
+            if (matchKeyword("LIKE") || matchName("LIKE")) {
+                SqlToken patTok = peek();
+                if (patTok.type == SqlToken.Type.STRING || patTok.type == SqlToken.Type.IDENTIFIER) {
+                    pattern = patTok.value;
+                    consume();
+                } else {
+                    throw new SqlSyntaxException("Expected pattern string after LIKE", patTok.position);
+                }
+            }
+            Clause.Where where = parseOptionalWhere();
+            return new Command.ShowVariables(pattern, where);
+        } else if (matchName("GLOBAL") || matchName("SESSION")) {
+            String scope = tokens.get(pos - 1).value.toUpperCase();
+            if (matchName("VARIABLES") || matchKeyword("VARIABLES")) {
+                String pattern = null;
+                if (matchKeyword("LIKE") || matchName("LIKE")) {
+                    SqlToken patTok = peek();
+                    if (patTok.type == SqlToken.Type.STRING || patTok.type == SqlToken.Type.IDENTIFIER) {
+                        pattern = patTok.value;
+                        consume();
+                    } else {
+                        throw new SqlSyntaxException("Expected pattern string after LIKE", patTok.position);
+                    }
+                }
+                Clause.Where where = parseOptionalWhere();
+                return new Command.ShowVariables(pattern, where);
+            } else if (matchName("STATUS") || matchKeyword("STATUS")) {
+                String pattern = null;
+                if (matchKeyword("LIKE") || matchName("LIKE")) {
+                    SqlToken patTok = peek();
+                    if (patTok.type == SqlToken.Type.STRING || patTok.type == SqlToken.Type.IDENTIFIER) {
+                        pattern = patTok.value;
+                        consume();
+                    } else {
+                        throw new SqlSyntaxException("Expected pattern string after LIKE", patTok.position);
+                    }
+                }
+                Clause.Where where = parseOptionalWhere();
+                return new Command.ShowStatus(pattern, where);
+            } else {
+                throw new SqlSyntaxException("Expected 'VARIABLES' or 'STATUS' after 'SHOW " + scope + "'", peek().position);
+            }
+        } else if (matchName("STATUS") || matchKeyword("STATUS")) {
+            String pattern = null;
+            if (matchKeyword("LIKE") || matchName("LIKE")) {
+                SqlToken patTok = peek();
+                if (patTok.type == SqlToken.Type.STRING || patTok.type == SqlToken.Type.IDENTIFIER) {
+                    pattern = patTok.value;
+                    consume();
+                } else {
+                    throw new SqlSyntaxException("Expected pattern string after LIKE", patTok.position);
+                }
+            }
+            Clause.Where where = parseOptionalWhere();
+            return new Command.ShowStatus(pattern, where);
+        } else if (matchName("WARNINGS")) {
+            return new Command.ShowWarnings();
+        } else if (matchName("ERRORS")) {
+            return new Command.ShowErrors();
+        } else if (matchName("PROCESSLIST")) {
+            return new Command.ShowProcesslist();
+        } else if (matchName("GRANTS")) {
+            String userHost = null;
+            if (matchKeyword("FOR")) {
+                SqlToken uTok = peek();
+                if (uTok.type == SqlToken.Type.STRING || uTok.type == SqlToken.Type.IDENTIFIER) {
+                    userHost = uTok.value;
+                    consume();
+                }
+            }
+            return new Command.ShowGrants(userHost);
         } else {
-            throw new SqlSyntaxException("Expected 'DATABASES', 'TABLES', 'COLUMNS', 'PROCEDURE STATUS', 'CHARACTER SET', 'COLLATION', 'CREATE DATABASE', 'CREATE TABLE' or 'FUNCTION STATUS' after 'SHOW'", peek().position);
+            throw new SqlSyntaxException("Expected 'DATABASES', 'TABLES', 'COLUMNS', 'VARIABLES', 'STATUS', 'PROCEDURE STATUS', 'CHARACTER SET', 'COLLATION', 'CREATE DATABASE', 'CREATE TABLE' or 'FUNCTION STATUS' after 'SHOW'", peek().position);
         }
     }
 
@@ -1732,19 +1853,7 @@ projection.add(selectItem);
         if (matchKeyword("ORDER")) {
             expectKeyword("BY", "Expected 'BY' after 'ORDER'");
             do {
-                expect(SqlToken.Type.IDENTIFIER, "Expected column name for order sorting");
-                String col = tokens.get(pos - 1).value;
-                if (matchSymbol(".")) {
-                    expect(SqlToken.Type.IDENTIFIER, "Expected column name after '.'");
-                    col = col + "." + tokens.get(pos - 1).value;
-                }
-                boolean asc = true;
-                if (matchKeyword("DESC")) {
-                    asc = false;
-                } else {
-                    matchKeyword("ASC"); // Optional
-                }
-                orderBySpecs.add(new Clause.OrderBy(col, asc));
+                orderBySpecs.add(parseOrderBySpec());
             } while (matchSymbol(","));
         }
 
@@ -1813,6 +1922,60 @@ projection.add(selectItem);
             throw new SqlSyntaxException("Expected expression or column name in GROUP BY", peek().position);
         }
         return exprStr;
+    }
+
+    private Clause.OrderBy parseOrderBySpec() throws SqlSyntaxException {
+        StringBuilder sb = new StringBuilder();
+        int parenDepth = 0;
+        boolean asc = true;
+        while (peek().type != SqlToken.Type.EOF) {
+            SqlToken t = peek();
+            if (parenDepth == 0) {
+                if (t.type == SqlToken.Type.SYMBOL && (",".equals(t.value) || ";".equals(t.value) || ")".equals(t.value))) {
+                    break;
+                }
+                if (t.type == SqlToken.Type.KEYWORD) {
+                    if ("ASC".equalsIgnoreCase(t.value)) {
+                        consume();
+                        asc = true;
+                        break;
+                    }
+                    if ("DESC".equalsIgnoreCase(t.value)) {
+                        consume();
+                        asc = false;
+                        break;
+                    }
+                    if ("LIMIT".equalsIgnoreCase(t.value) || "UNION".equalsIgnoreCase(t.value)) {
+                        break;
+                    }
+                }
+            }
+            consume();
+            if (t.type == SqlToken.Type.SYMBOL) {
+                if ("(".equals(t.value)) parenDepth++;
+                else if (")".equals(t.value)) parenDepth--;
+            }
+            if (t.type == SqlToken.Type.STRING) {
+                if (sb.length() > 0 && !lastCharIs(sb, '(') && !lastCharIs(sb, ',') && !lastCharIs(sb, '.')) {
+                    sb.append(" ");
+                }
+                sb.append("'").append(t.value.replace("'", "\\'")).append("'");
+            } else if (t.value.equals("(") || t.value.equals(".")) {
+                sb.append(t.value);
+            } else if (t.value.equals(")") || t.value.equals(",")) {
+                sb.append(t.value);
+            } else {
+                if (sb.length() > 0 && !lastCharIs(sb, '(') && !lastCharIs(sb, ',') && !lastCharIs(sb, '.')) {
+                    sb.append(" ");
+                }
+                sb.append(t.value);
+            }
+        }
+        String exprStr = sb.toString().trim();
+        if (exprStr.isEmpty()) {
+            throw new SqlSyntaxException("Expected expression or column name in ORDER BY", peek().position);
+        }
+        return new Clause.OrderBy(exprStr, asc);
     }
 
     private String parseTableAlias() throws SqlSyntaxException {

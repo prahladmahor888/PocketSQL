@@ -337,6 +337,25 @@ public class SqlSystemDatabaseManager {
                             if (tblObj == null) continue;
                             boolean isView = tblObj.optBoolean("is_view", false);
                             
+                            long tableRows = 0L;
+                            long dataLength = 0L;
+                            String createTimeStr = "2026-08-30 00:00:00";
+                            try {
+                                java.io.File tblFile = new java.io.File(new java.io.File(engine.getStorageEngine().getDatabasesDir(), dbName), tblName + ".pqsql");
+                                if (tblFile.exists()) {
+                                    dataLength = tblFile.length();
+                                    createTimeStr = new java.text.SimpleDateFormat("yyyy-MM-dd HH:mm:ss").format(new java.util.Date(tblFile.lastModified()));
+                                    if (engine.tableCache.containsKey(tblName)) {
+                                        tableRows = engine.tableCache.get(tblName).rows.size();
+                                    } else if (dataLength > 0 && dataLength < 200000) {
+                                        JSONArray rArr = engine.getStorageEngine().readTableRows(dbName, tblName);
+                                        if (rArr != null) {
+                                            tableRows = rArr.length();
+                                        }
+                                    }
+                                }
+                            } catch (Exception ignored) {}
+
                             Map<String, Object> r = new HashMap<>();
                             r.put("TABLE_CATALOG", "def");
                             r.put("TABLE_SCHEMA", dbName);
@@ -345,10 +364,10 @@ public class SqlSystemDatabaseManager {
                             r.put("ENGINE", "PocketSQL");
                             r.put("VERSION", "10");
                             r.put("ROW_FORMAT", "Dynamic");
-                            r.put("TABLE_ROWS", "0");
-                            r.put("DATA_LENGTH", "0");
+                            r.put("TABLE_ROWS", String.valueOf(tableRows));
+                            r.put("DATA_LENGTH", String.valueOf(dataLength));
                             r.put("INDEX_LENGTH", "0");
-                            r.put("CREATE_TIME", null);
+                            r.put("CREATE_TIME", createTimeStr);
                             r.put("UPDATE_TIME", null);
                             r.put("CHECK_TIME", null);
                             r.put("TABLE_COLLATION", "utf8mb4_0900_ai_ci");
@@ -2468,7 +2487,7 @@ public class SqlSystemDatabaseManager {
             r.put("TABLE_CATALOG", "def");
             r.put("TABLE_SCHEMA", "sys");
             r.put("TABLE_NAME", tbl);
-            r.put("TABLE_TYPE", "version".equals(tbl) ? "VIEW" : "BASE TABLE");
+            r.put("TABLE_TYPE", "VIEW");
             r.put("ENGINE", "PocketSQL");
             r.put("VERSION", "10");
             r.put("ROW_FORMAT", "Dynamic");
@@ -2491,34 +2510,303 @@ public class SqlSystemDatabaseManager {
         for (String db : systemDbs) {
             List<String> tables = getSystemTables(db);
             for (String tbl : tables) {
-                if ("information_schema".equals(db) && "columns".equalsIgnoreCase(tbl)) {
-                    addSystemCol(td, "information_schema", "COLUMNS", "TABLE_CATALOG", 1, "VARCHAR");
-                    addSystemCol(td, "information_schema", "COLUMNS", "TABLE_SCHEMA", 2, "VARCHAR");
-                    addSystemCol(td, "information_schema", "COLUMNS", "TABLE_NAME", 3, "VARCHAR");
-                    addSystemCol(td, "information_schema", "COLUMNS", "COLUMN_NAME", 4, "VARCHAR");
-                    addSystemCol(td, "information_schema", "COLUMNS", "ORDINAL_POSITION", 5, "BIGINT");
-                    addSystemCol(td, "information_schema", "COLUMNS", "COLUMN_DEFAULT", 6, "VARCHAR");
-                    addSystemCol(td, "information_schema", "COLUMNS", "IS_NULLABLE", 7, "VARCHAR");
-                    addSystemCol(td, "information_schema", "COLUMNS", "DATA_TYPE", 8, "VARCHAR");
-                    addSystemCol(td, "information_schema", "COLUMNS", "CHARACTER_MAXIMUM_LENGTH", 9, "BIGINT");
-                    addSystemCol(td, "information_schema", "COLUMNS", "COLUMN_TYPE", 10, "VARCHAR");
-                    addSystemCol(td, "information_schema", "COLUMNS", "COLUMN_KEY", 11, "VARCHAR");
-                    addSystemCol(td, "information_schema", "COLUMNS", "EXTRA", 12, "VARCHAR");
-                    continue;
-                }
-                
-                try {
-                    TableData tableData = getSystemTable(engine, db, tbl);
-                    for (int i = 0; i < tableData.columns.size(); i++) {
-                        String colName = tableData.columns.get(i);
-                        String colType = tableData.types.get(i);
-                        addSystemCol(td, db, tbl, colName, i + 1, colType);
-                    }
-                } catch (Exception e) {
-                    com.mysql.pocketsql.engine.SqlLog.printStackTrace(e);
+                List<String[]> colsMeta = getSystemTableColumnNamesAndTypes(db, tbl);
+                for (int i = 0; i < colsMeta.size(); i++) {
+                    String[] pair = colsMeta.get(i);
+                    addSystemCol(td, db, tbl, pair[0], i + 1, pair[1]);
                 }
             }
         }
+    }
+
+    private List<String[]> getSystemTableColumnNamesAndTypes(String db, String table) {
+        List<String[]> list = new ArrayList<>();
+        db = db.toLowerCase();
+        table = table.toLowerCase();
+
+        if ("information_schema".equals(db)) {
+            switch (table) {
+                case "schemata":
+                    list.add(new String[]{"CATALOG_NAME", "VARCHAR"});
+                    list.add(new String[]{"SCHEMA_NAME", "VARCHAR"});
+                    list.add(new String[]{"DEFAULT_CHARACTER_SET_NAME", "VARCHAR"});
+                    list.add(new String[]{"DEFAULT_COLLATION_NAME", "VARCHAR"});
+                    list.add(new String[]{"SQL_PATH", "VARCHAR"});
+                    break;
+                case "tables":
+                    list.add(new String[]{"TABLE_CATALOG", "VARCHAR"});
+                    list.add(new String[]{"TABLE_SCHEMA", "VARCHAR"});
+                    list.add(new String[]{"TABLE_NAME", "VARCHAR"});
+                    list.add(new String[]{"TABLE_TYPE", "VARCHAR"});
+                    list.add(new String[]{"ENGINE", "VARCHAR"});
+                    list.add(new String[]{"VERSION", "VARCHAR"});
+                    list.add(new String[]{"ROW_FORMAT", "VARCHAR"});
+                    list.add(new String[]{"TABLE_ROWS", "VARCHAR"});
+                    list.add(new String[]{"DATA_LENGTH", "VARCHAR"});
+                    list.add(new String[]{"INDEX_LENGTH", "VARCHAR"});
+                    list.add(new String[]{"CREATE_TIME", "VARCHAR"});
+                    list.add(new String[]{"UPDATE_TIME", "VARCHAR"});
+                    list.add(new String[]{"CHECK_TIME", "VARCHAR"});
+                    list.add(new String[]{"TABLE_COLLATION", "VARCHAR"});
+                    list.add(new String[]{"CHECKSUM", "VARCHAR"});
+                    list.add(new String[]{"CREATE_OPTIONS", "VARCHAR"});
+                    list.add(new String[]{"TABLE_COMMENT", "VARCHAR"});
+                    break;
+                case "columns":
+                    list.add(new String[]{"TABLE_CATALOG", "VARCHAR"});
+                    list.add(new String[]{"TABLE_SCHEMA", "VARCHAR"});
+                    list.add(new String[]{"TABLE_NAME", "VARCHAR"});
+                    list.add(new String[]{"COLUMN_NAME", "VARCHAR"});
+                    list.add(new String[]{"ORDINAL_POSITION", "BIGINT"});
+                    list.add(new String[]{"COLUMN_DEFAULT", "VARCHAR"});
+                    list.add(new String[]{"IS_NULLABLE", "VARCHAR"});
+                    list.add(new String[]{"DATA_TYPE", "VARCHAR"});
+                    list.add(new String[]{"CHARACTER_MAXIMUM_LENGTH", "BIGINT"});
+                    list.add(new String[]{"COLUMN_TYPE", "VARCHAR"});
+                    list.add(new String[]{"COLUMN_KEY", "VARCHAR"});
+                    list.add(new String[]{"EXTRA", "VARCHAR"});
+                    break;
+                case "character_sets":
+                    list.add(new String[]{"CHARACTER_SET_NAME", "VARCHAR"});
+                    list.add(new String[]{"DEFAULT_COLLATE_NAME", "VARCHAR"});
+                    list.add(new String[]{"DESCRIPTION", "VARCHAR"});
+                    list.add(new String[]{"MAXLEN", "BIGINT"});
+                    break;
+                case "collations":
+                    list.add(new String[]{"COLLATION_NAME", "VARCHAR"});
+                    list.add(new String[]{"CHARACTER_SET_NAME", "VARCHAR"});
+                    list.add(new String[]{"ID", "BIGINT"});
+                    list.add(new String[]{"IS_DEFAULT", "VARCHAR"});
+                    list.add(new String[]{"IS_COMPILED", "VARCHAR"});
+                    list.add(new String[]{"SORTLEN", "BIGINT"});
+                    list.add(new String[]{"PAD_ATTRIBUTE", "VARCHAR"});
+                    break;
+                case "key_column_usage":
+                    list.add(new String[]{"CONSTRAINT_CATALOG", "VARCHAR"});
+                    list.add(new String[]{"CONSTRAINT_SCHEMA", "VARCHAR"});
+                    list.add(new String[]{"CONSTRAINT_NAME", "VARCHAR"});
+                    list.add(new String[]{"TABLE_CATALOG", "VARCHAR"});
+                    list.add(new String[]{"TABLE_SCHEMA", "VARCHAR"});
+                    list.add(new String[]{"TABLE_NAME", "VARCHAR"});
+                    list.add(new String[]{"COLUMN_NAME", "VARCHAR"});
+                    list.add(new String[]{"ORDINAL_POSITION", "BIGINT"});
+                    list.add(new String[]{"POSITION_IN_UNIQUE_CONSTRAINT", "BIGINT"});
+                    list.add(new String[]{"REFERENCED_TABLE_SCHEMA", "VARCHAR"});
+                    list.add(new String[]{"REFERENCED_TABLE_NAME", "VARCHAR"});
+                    list.add(new String[]{"REFERENCED_COLUMN_NAME", "VARCHAR"});
+                    break;
+                case "table_constraints":
+                    list.add(new String[]{"CONSTRAINT_CATALOG", "VARCHAR"});
+                    list.add(new String[]{"CONSTRAINT_SCHEMA", "VARCHAR"});
+                    list.add(new String[]{"CONSTRAINT_NAME", "VARCHAR"});
+                    list.add(new String[]{"TABLE_SCHEMA", "VARCHAR"});
+                    list.add(new String[]{"TABLE_NAME", "VARCHAR"});
+                    list.add(new String[]{"CONSTRAINT_TYPE", "VARCHAR"});
+                    break;
+                case "referential_constraints":
+                    list.add(new String[]{"CONSTRAINT_CATALOG", "VARCHAR"});
+                    list.add(new String[]{"CONSTRAINT_SCHEMA", "VARCHAR"});
+                    list.add(new String[]{"CONSTRAINT_NAME", "VARCHAR"});
+                    list.add(new String[]{"UNIQUE_CONSTRAINT_CATALOG", "VARCHAR"});
+                    list.add(new String[]{"UNIQUE_CONSTRAINT_SCHEMA", "VARCHAR"});
+                    list.add(new String[]{"UNIQUE_CONSTRAINT_NAME", "VARCHAR"});
+                    list.add(new String[]{"MATCH_OPTION", "VARCHAR"});
+                    list.add(new String[]{"UPDATE_RULE", "VARCHAR"});
+                    list.add(new String[]{"DELETE_RULE", "VARCHAR"});
+                    list.add(new String[]{"TABLE_NAME", "VARCHAR"});
+                    list.add(new String[]{"REFERENCED_TABLE_NAME", "VARCHAR"});
+                    break;
+                case "routines":
+                    list.add(new String[]{"SPECIFIC_NAME", "VARCHAR"});
+                    list.add(new String[]{"ROUTINE_CATALOG", "VARCHAR"});
+                    list.add(new String[]{"ROUTINE_SCHEMA", "VARCHAR"});
+                    list.add(new String[]{"ROUTINE_NAME", "VARCHAR"});
+                    list.add(new String[]{"ROUTINE_TYPE", "VARCHAR"});
+                    list.add(new String[]{"DATA_TYPE", "VARCHAR"});
+                    list.add(new String[]{"CHARACTER_MAXIMUM_LENGTH", "BIGINT"});
+                    list.add(new String[]{"CHARACTER_OCTET_LENGTH", "BIGINT"});
+                    list.add(new String[]{"NUMERIC_PRECISION", "BIGINT"});
+                    list.add(new String[]{"NUMERIC_SCALE", "BIGINT"});
+                    list.add(new String[]{"DATETIME_PRECISION", "BIGINT"});
+                    list.add(new String[]{"CHARACTER_SET_NAME", "VARCHAR"});
+                    list.add(new String[]{"COLLATION_NAME", "VARCHAR"});
+                    list.add(new String[]{"DTD_IDENTIFIER", "LONGTEXT"});
+                    list.add(new String[]{"ROUTINE_BODY", "VARCHAR"});
+                    list.add(new String[]{"ROUTINE_DEFINITION", "LONGTEXT"});
+                    list.add(new String[]{"EXTERNAL_NAME", "VARCHAR"});
+                    list.add(new String[]{"EXTERNAL_LANGUAGE", "VARCHAR"});
+                    list.add(new String[]{"PARAMETER_STYLE", "VARCHAR"});
+                    list.add(new String[]{"IS_DETERMINISTIC", "VARCHAR"});
+                    list.add(new String[]{"SQL_DATA_ACCESS", "VARCHAR"});
+                    list.add(new String[]{"SQL_PATH", "VARCHAR"});
+                    list.add(new String[]{"SECURITY_TYPE", "VARCHAR"});
+                    list.add(new String[]{"CREATED", "DATETIME"});
+                    list.add(new String[]{"LAST_ALTERED", "DATETIME"});
+                    list.add(new String[]{"SQL_MODE", "VARCHAR"});
+                    list.add(new String[]{"ROUTINE_COMMENT", "TEXT"});
+                    list.add(new String[]{"DEFINER", "VARCHAR"});
+                    list.add(new String[]{"CHARACTER_SET_CLIENT", "VARCHAR"});
+                    list.add(new String[]{"COLLATION_CONNECTION", "VARCHAR"});
+                    list.add(new String[]{"DATABASE_COLLATION", "VARCHAR"});
+                    break;
+                case "views":
+                    list.add(new String[]{"TABLE_CATALOG", "VARCHAR"});
+                    list.add(new String[]{"TABLE_SCHEMA", "VARCHAR"});
+                    list.add(new String[]{"TABLE_NAME", "VARCHAR"});
+                    list.add(new String[]{"VIEW_DEFINITION", "LONGTEXT"});
+                    list.add(new String[]{"CHECK_OPTION", "VARCHAR"});
+                    list.add(new String[]{"IS_UPDATABLE", "VARCHAR"});
+                    list.add(new String[]{"DEFINER", "VARCHAR"});
+                    list.add(new String[]{"SECURITY_TYPE", "VARCHAR"});
+                    list.add(new String[]{"CHARACTER_SET_CLIENT", "VARCHAR"});
+                    list.add(new String[]{"COLLATION_CONNECTION", "VARCHAR"});
+                    break;
+                case "statistics":
+                    list.add(new String[]{"TABLE_CATALOG", "VARCHAR"});
+                    list.add(new String[]{"TABLE_SCHEMA", "VARCHAR"});
+                    list.add(new String[]{"TABLE_NAME", "VARCHAR"});
+                    list.add(new String[]{"NON_UNIQUE", "BIGINT"});
+                    list.add(new String[]{"INDEX_SCHEMA", "VARCHAR"});
+                    list.add(new String[]{"INDEX_NAME", "VARCHAR"});
+                    list.add(new String[]{"SEQ_IN_INDEX", "BIGINT"});
+                    list.add(new String[]{"COLUMN_NAME", "VARCHAR"});
+                    list.add(new String[]{"COLLATION", "VARCHAR"});
+                    list.add(new String[]{"CARDINALITY", "BIGINT"});
+                    list.add(new String[]{"SUB_PART", "BIGINT"});
+                    list.add(new String[]{"PACKED", "VARCHAR"});
+                    list.add(new String[]{"NULLABLE", "VARCHAR"});
+                    list.add(new String[]{"INDEX_TYPE", "VARCHAR"});
+                    list.add(new String[]{"COMMENT", "VARCHAR"});
+                    list.add(new String[]{"INDEX_COMMENT", "VARCHAR"});
+                    list.add(new String[]{"IS_VISIBLE", "VARCHAR"});
+                    list.add(new String[]{"EXPRESSION", "LONGTEXT"});
+                    break;
+                case "triggers":
+                    list.add(new String[]{"TRIGGER_CATALOG", "VARCHAR"});
+                    list.add(new String[]{"TRIGGER_SCHEMA", "VARCHAR"});
+                    list.add(new String[]{"TRIGGER_NAME", "VARCHAR"});
+                    list.add(new String[]{"EVENT_MANIPULATION", "VARCHAR"});
+                    list.add(new String[]{"EVENT_OBJECT_CATALOG", "VARCHAR"});
+                    list.add(new String[]{"EVENT_OBJECT_SCHEMA", "VARCHAR"});
+                    list.add(new String[]{"EVENT_OBJECT_TABLE", "VARCHAR"});
+                    list.add(new String[]{"ACTION_ORDER", "BIGINT"});
+                    list.add(new String[]{"ACTION_CONDITION", "LONGTEXT"});
+                    list.add(new String[]{"ACTION_STATEMENT", "LONGTEXT"});
+                    list.add(new String[]{"ACTION_ORIENTATION", "VARCHAR"});
+                    list.add(new String[]{"ACTION_TIMING", "VARCHAR"});
+                    list.add(new String[]{"ACTION_REFERENCE_OLD_TABLE", "VARCHAR"});
+                    list.add(new String[]{"ACTION_REFERENCE_NEW_TABLE", "VARCHAR"});
+                    list.add(new String[]{"ACTION_REFERENCE_OLD_ROW", "VARCHAR"});
+                    list.add(new String[]{"ACTION_REFERENCE_NEW_ROW", "VARCHAR"});
+                    list.add(new String[]{"CREATED", "DATETIME"});
+                    list.add(new String[]{"SQL_MODE", "VARCHAR"});
+                    list.add(new String[]{"DEFINER", "VARCHAR"});
+                    list.add(new String[]{"CHARACTER_SET_CLIENT", "VARCHAR"});
+                    list.add(new String[]{"COLLATION_CONNECTION", "VARCHAR"});
+                    list.add(new String[]{"DATABASE_COLLATION", "VARCHAR"});
+                    break;
+                case "events":
+                    list.add(new String[]{"EVENT_CATALOG", "VARCHAR"});
+                    list.add(new String[]{"EVENT_SCHEMA", "VARCHAR"});
+                    list.add(new String[]{"EVENT_NAME", "VARCHAR"});
+                    list.add(new String[]{"DEFINER", "VARCHAR"});
+                    list.add(new String[]{"TIME_ZONE", "VARCHAR"});
+                    list.add(new String[]{"EVENT_BODY", "VARCHAR"});
+                    list.add(new String[]{"EVENT_DEFINITION", "LONGTEXT"});
+                    list.add(new String[]{"EVENT_TYPE", "VARCHAR"});
+                    list.add(new String[]{"EXECUTE_AT", "DATETIME"});
+                    list.add(new String[]{"INTERVAL_VALUE", "VARCHAR"});
+                    list.add(new String[]{"INTERVAL_FIELD", "VARCHAR"});
+                    list.add(new String[]{"SQL_MODE", "VARCHAR"});
+                    list.add(new String[]{"STARTS", "DATETIME"});
+                    list.add(new String[]{"ENDS", "DATETIME"});
+                    list.add(new String[]{"STATUS", "VARCHAR"});
+                    list.add(new String[]{"ON_COMPLETION", "VARCHAR"});
+                    list.add(new String[]{"CREATED", "DATETIME"});
+                    list.add(new String[]{"LAST_ALTERED", "DATETIME"});
+                    list.add(new String[]{"LAST_EXECUTED", "DATETIME"});
+                    list.add(new String[]{"EVENT_COMMENT", "VARCHAR"});
+                    list.add(new String[]{"ORIGINATOR", "BIGINT"});
+                    list.add(new String[]{"CHARACTER_SET_CLIENT", "VARCHAR"});
+                    list.add(new String[]{"COLLATION_CONNECTION", "VARCHAR"});
+                    list.add(new String[]{"DATABASE_COLLATION", "VARCHAR"});
+                    break;
+                case "user_privileges":
+                    list.add(new String[]{"GRANTEE", "VARCHAR"});
+                    list.add(new String[]{"TABLE_CATALOG", "VARCHAR"});
+                    list.add(new String[]{"PRIVILEGE_TYPE", "VARCHAR"});
+                    list.add(new String[]{"IS_GRANTABLE", "VARCHAR"});
+                    break;
+                case "schema_privileges":
+                    list.add(new String[]{"GRANTEE", "VARCHAR"});
+                    list.add(new String[]{"TABLE_CATALOG", "VARCHAR"});
+                    list.add(new String[]{"TABLE_SCHEMA", "VARCHAR"});
+                    list.add(new String[]{"PRIVILEGE_TYPE", "VARCHAR"});
+                    list.add(new String[]{"IS_GRANTABLE", "VARCHAR"});
+                    break;
+                case "table_privileges":
+                    list.add(new String[]{"GRANTEE", "VARCHAR"});
+                    list.add(new String[]{"TABLE_CATALOG", "VARCHAR"});
+                    list.add(new String[]{"TABLE_SCHEMA", "VARCHAR"});
+                    list.add(new String[]{"TABLE_NAME", "VARCHAR"});
+                    list.add(new String[]{"PRIVILEGE_TYPE", "VARCHAR"});
+                    list.add(new String[]{"IS_GRANTABLE", "VARCHAR"});
+                    break;
+                case "engines":
+                    list.add(new String[]{"ENGINE", "VARCHAR"});
+                    list.add(new String[]{"SUPPORT", "VARCHAR"});
+                    list.add(new String[]{"COMMENT", "VARCHAR"});
+                    list.add(new String[]{"TRANSACTIONS", "VARCHAR"});
+                    list.add(new String[]{"XA", "VARCHAR"});
+                    list.add(new String[]{"SAVEPOINTS", "VARCHAR"});
+                    break;
+                case "processlist":
+                    list.add(new String[]{"ID", "BIGINT"});
+                    list.add(new String[]{"USER", "VARCHAR"});
+                    list.add(new String[]{"HOST", "VARCHAR"});
+                    list.add(new String[]{"DB", "VARCHAR"});
+                    list.add(new String[]{"COMMAND", "VARCHAR"});
+                    list.add(new String[]{"TIME", "BIGINT"});
+                    list.add(new String[]{"STATE", "VARCHAR"});
+                    list.add(new String[]{"INFO", "LONGTEXT"});
+                    break;
+                case "user_attributes":
+                    list.add(new String[]{"USER", "VARCHAR"});
+                    list.add(new String[]{"HOST", "VARCHAR"});
+                    list.add(new String[]{"ATTRIBUTE", "JSON"});
+                    break;
+            }
+        } else if ("pocketsql".equals(db)) {
+            if ("user".equals(table)) {
+                list.add(new String[]{"Host", "VARCHAR"});
+                list.add(new String[]{"User", "VARCHAR"});
+                list.add(new String[]{"Select_priv", "VARCHAR"});
+                list.add(new String[]{"Insert_priv", "VARCHAR"});
+                list.add(new String[]{"Update_priv", "VARCHAR"});
+                list.add(new String[]{"Delete_priv", "VARCHAR"});
+                list.add(new String[]{"Create_priv", "VARCHAR"});
+                list.add(new String[]{"Drop_priv", "VARCHAR"});
+                list.add(new String[]{"Grant_priv", "VARCHAR"});
+                list.add(new String[]{"authentication_string", "VARCHAR"});
+            } else if ("db".equals(table)) {
+                list.add(new String[]{"Host", "VARCHAR"});
+                list.add(new String[]{"Db", "VARCHAR"});
+                list.add(new String[]{"User", "VARCHAR"});
+                list.add(new String[]{"Select_priv", "VARCHAR"});
+                list.add(new String[]{"Insert_priv", "VARCHAR"});
+                list.add(new String[]{"Update_priv", "VARCHAR"});
+                list.add(new String[]{"Delete_priv", "VARCHAR"});
+                list.add(new String[]{"Create_priv", "VARCHAR"});
+                list.add(new String[]{"Drop_priv", "VARCHAR"});
+                list.add(new String[]{"Grant_priv", "VARCHAR"});
+            }
+        } else if ("sys".equals(db)) {
+            if ("version".equals(table)) {
+                list.add(new String[]{"sys_version", "VARCHAR"});
+                list.add(new String[]{"mysql_version", "VARCHAR"});
+            }
+        }
+        return list;
     }
 
     private void addSystemCol(TableData td, String db, String tbl, String col, int pos, String type) {

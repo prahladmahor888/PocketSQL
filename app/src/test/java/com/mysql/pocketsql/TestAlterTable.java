@@ -888,6 +888,238 @@ public class TestAlterTable {
         assertEquals("Aman Gupta", r2.get("youngest_person"));
         assertEquals("Vikas Rao", r2.get("oldest_person"));
     }
+
+    @Test
+    public void testBacktickIdentifiersAndCte() throws Exception {
+        File testDir = new File("build/test-pocketsql-backticks-cte");
+        if (testDir.exists()) {
+            deleteRecursive(testDir);
+        }
+        testDir.mkdirs();
+
+        DatabaseEngine engine = new DatabaseEngine(testDir);
+        engine.initializeDefaultRootUser();
+        engine.setCurrentUser("root", "localhost");
+
+        engine.execute("CREATE DATABASE company;");
+        engine.execute("USE company;");
+        engine.execute("CREATE TABLE products (`product_id` INT, `product_name` VARCHAR(50), `category` VARCHAR(50));");
+        engine.execute("CREATE TABLE order_items (`product_id` INT, `quantity` INT, `unit_price` DOUBLE);");
+
+        engine.execute("INSERT INTO products VALUES (1, 'Phone', 'Electronics'), (2, 'Laptop', 'Electronics'), (3, 'Shirt', 'Apparel');");
+        engine.execute("INSERT INTO order_items VALUES (1, 2, 500.0), (2, 1, 1200.0), (3, 5, 20.0);");
+
+        String cteQuery = "WITH RankedProducts AS (" +
+            "    SELECT " +
+            "        p.category, " +
+            "        p.product_id, " +
+            "        p.product_name, " +
+            "        SUM(oi.quantity) AS units_sold, " +
+            "        SUM(oi.quantity * oi.unit_price) AS total_revenue, " +
+            "        DENSE_RANK() OVER (" +
+            "            PARTITION BY p.category " +
+            "            ORDER BY SUM(oi.quantity * oi.unit_price) DESC" +
+            "        ) AS rank_in_category " +
+            "    FROM products p " +
+            "    INNER JOIN order_items oi ON p.product_id = oi.product_id " +
+            "    GROUP BY p.category, p.product_id, p.product_name " +
+            ") " +
+            "SELECT " +
+            "    category, " +
+            "    rank_in_category AS `rank`, " +
+            "    product_id, " +
+            "    product_name, " +
+            "    units_sold, " +
+            "    total_revenue " +
+            "FROM RankedProducts " +
+            "WHERE rank_in_category <= 2 " +
+            "ORDER BY category, rank_in_category;";
+
+        QueryResult res = engine.execute(cteQuery);
+        assertTrue(res.message, res.success);
+        assertNotNull(res.rows);
+        assertTrue(res.rows.size() > 0);
+        assertTrue(res.columns.contains("rank"));
+    }
+
+    @Test
+    public void testGroupByProjectionAlias() throws Exception {
+        File testDir = new File("build/test-pocketsql-groupby-alias");
+        if (testDir.exists()) {
+            deleteRecursive(testDir);
+        }
+        testDir.mkdirs();
+
+        DatabaseEngine engine = new DatabaseEngine(testDir);
+        engine.initializeDefaultRootUser();
+        engine.setCurrentUser("root", "localhost");
+
+        engine.execute("CREATE DATABASE sales_db;");
+        engine.execute("USE sales_db;");
+        engine.execute("CREATE TABLE orders (order_id INT, order_date VARCHAR(20));");
+        engine.execute("CREATE TABLE order_items (order_id INT, quantity INT, unit_price DOUBLE);");
+
+        engine.execute("INSERT INTO orders VALUES (1, '2026-08-15'), (2, '2026-08-20'), (3, '2026-09-01');");
+        engine.execute("INSERT INTO order_items VALUES (1, 2, 100.0), (2, 3, 50.0), (3, 1, 300.0);");
+
+        String query = "SELECT " +
+            "    DATE_FORMAT(o.order_date, '%Y-%m') AS sales_month, " +
+            "    COUNT(DISTINCT o.order_id) AS total_orders, " +
+            "    SUM(oi.quantity) AS total_items_sold, " +
+            "    SUM(oi.quantity * oi.unit_price) AS total_revenue " +
+            "FROM orders o " +
+            "INNER JOIN order_items oi ON o.order_id = oi.order_id " +
+            "GROUP BY sales_month " +
+            "ORDER BY sales_month;";
+
+        QueryResult res = engine.execute(query);
+        assertTrue(res.message, res.success);
+        assertNotNull(res.rows);
+        assertEquals(2, res.rows.size());
+        assertEquals("2026-08", res.rows.get(0).get("sales_month"));
+        assertEquals(2L, res.rows.get(0).get("total_orders"));
+        assertEquals(5.0, ((Number)res.rows.get(0).get("total_items_sold")).doubleValue(), 0.001);
+        assertEquals(350.0, ((Number)res.rows.get(0).get("total_revenue")).doubleValue(), 0.001);
+    }
+
+    @Test
+    public void testOrderByFunctionExpressions() throws Exception {
+        File testDir = new File("build/test-pocketsql-orderby-expr");
+        if (testDir.exists()) {
+            deleteRecursive(testDir);
+        }
+        testDir.mkdirs();
+
+        DatabaseEngine engine = new DatabaseEngine(testDir);
+        engine.initializeDefaultRootUser();
+        engine.setCurrentUser("root", "localhost");
+
+        engine.execute("CREATE DATABASE sales_db2;");
+        engine.execute("USE sales_db2;");
+        engine.execute("CREATE TABLE orders (order_id INT, order_date VARCHAR(20));");
+        engine.execute("CREATE TABLE order_items (order_id INT, quantity INT, unit_price DOUBLE);");
+
+        engine.execute("INSERT INTO orders VALUES (1, '2026-08-15'), (2, '2026-08-20'), (3, '2026-09-01');");
+        engine.execute("INSERT INTO order_items VALUES (1, 2, 100.0), (2, 3, 50.0), (3, 1, 300.0);");
+
+        String query = "SELECT " +
+            "    CONCAT(MONTHNAME(o.order_date), ' ', YEAR(o.order_date)) AS sales_month, " +
+            "    COUNT(DISTINCT o.order_id) AS total_orders, " +
+            "    SUM(oi.quantity * oi.unit_price) AS total_revenue " +
+            "FROM orders o " +
+            "INNER JOIN order_items oi ON o.order_id = oi.order_id " +
+            "GROUP BY YEAR(o.order_date), MONTH(o.order_date), sales_month " +
+            "ORDER BY YEAR(o.order_date), MONTH(o.order_date);";
+
+        QueryResult res = engine.execute(query);
+        assertTrue(res.message, res.success);
+        assertNotNull(res.rows);
+        assertEquals(2, res.rows.size());
+        assertEquals("August 2026", res.rows.get(0).get("sales_month"));
+        assertEquals("September 2026", res.rows.get(1).get("sales_month"));
+    }
+
+    @Test
+    public void testShowVariablesAndSetGlobal() throws Exception {
+        File testDir = new File("build/test-pocketsql-show-vars");
+        if (testDir.exists()) {
+            deleteRecursive(testDir);
+        }
+        testDir.mkdirs();
+
+        DatabaseEngine engine = new DatabaseEngine(testDir);
+        engine.initializeDefaultRootUser();
+        engine.setCurrentUser("root", "localhost");
+
+        QueryResult resSet = engine.execute("SET GLOBAL log_bin_trust_function_creators = 1;");
+        assertTrue(resSet.message, resSet.success);
+
+        QueryResult resShow = engine.execute("SHOW VARIABLES LIKE 'log_bin_trust_function_creators';");
+        assertTrue(resShow.message, resShow.success);
+        assertNotNull(resShow.rows);
+        assertEquals(1, resShow.rows.size());
+        assertEquals("log_bin_trust_function_creators", resShow.rows.get(0).get("Variable_name"));
+        assertEquals("1", resShow.rows.get(0).get("Value"));
+
+        QueryResult resShowAll = engine.execute("SHOW GLOBAL VARIABLES;");
+        assertTrue(resShowAll.message, resShowAll.success);
+        assertTrue(resShowAll.rows.size() >= 10);
+
+        QueryResult resSelectGlobal = engine.execute("SELECT @@GLOBAL.log_bin_trust_function_creators AS is_enabled;");
+        assertTrue(resSelectGlobal.message, resSelectGlobal.success);
+        assertNotNull(resSelectGlobal.rows);
+        assertEquals(1, resSelectGlobal.rows.size());
+        assertEquals("1", resSelectGlobal.rows.get(0).get("is_enabled"));
+    }
+
+    @Test
+    public void testInformationSchemaRoutines() throws Exception {
+        File testDir = new File("build/test-pocketsql-routines");
+        if (testDir.exists()) {
+            deleteRecursive(testDir);
+        }
+        testDir.mkdirs();
+
+        DatabaseEngine engine = new DatabaseEngine(testDir);
+        engine.initializeDefaultRootUser();
+        engine.setCurrentUser("root", "localhost");
+        engine.execute("CREATE DATABASE test_db;");
+        engine.execute("USE test_db;");
+
+        String query = "SELECT " +
+            "    ROUTINE_NAME AS function_name, " +
+            "    DATA_TYPE AS return_type, " +
+            "    CREATED, " +
+            "    LAST_ALTERED " +
+            "FROM information_schema.ROUTINES " +
+            "WHERE ROUTINE_TYPE = 'FUNCTION' " +
+            "  AND ROUTINE_SCHEMA = DATABASE();";
+
+        QueryResult res = engine.execute(query);
+        assertTrue(res.message, res.success);
+        assertNotNull(res.rows);
+    }
+
+    @Test
+    public void testSqliteMasterAndPragma() throws Exception {
+        File testDir = new File("build/test-pocketsql-pragma");
+        if (testDir.exists()) {
+            deleteRecursive(testDir);
+        }
+        testDir.mkdirs();
+
+        DatabaseEngine engine = new DatabaseEngine(testDir);
+        engine.initializeDefaultRootUser();
+        engine.setCurrentUser("root", "localhost");
+        engine.execute("CREATE DATABASE company;");
+        engine.execute("USE company;");
+        engine.execute("CREATE TABLE users (user_id INT PRIMARY KEY, user_name VARCHAR(100));");
+
+        QueryResult resMaster = engine.execute("SELECT name, type FROM sqlite_master WHERE type='table';");
+        assertTrue(resMaster.message, resMaster.success);
+        assertNotNull(resMaster.rows);
+        assertEquals(1, resMaster.rows.size());
+        assertEquals("users", resMaster.rows.get(0).get("name"));
+        assertEquals("table", resMaster.rows.get(0).get("type"));
+
+        QueryResult resPragma = engine.execute("PRAGMA table_info(users);");
+        assertTrue(resPragma.message, resPragma.success);
+        assertNotNull(resPragma.rows);
+        assertEquals(2, resPragma.rows.size());
+        assertEquals("user_id", resPragma.rows.get(0).get("name"));
+        assertEquals("user_name", resPragma.rows.get(1).get("name"));
+
+        QueryResult resShowLike = engine.execute("SHOW DATABASES LIKE 'company';");
+        assertTrue(resShowLike.message, resShowLike.success);
+        assertNotNull(resShowLike.rows);
+        assertEquals(1, resShowLike.rows.size());
+        assertEquals("company", resShowLike.rows.get(0).get("Database"));
+
+        QueryResult resShowSchemas = engine.execute("SHOW SCHEMAS LIKE 'nonexistent%';");
+        assertTrue(resShowSchemas.message, resShowSchemas.success);
+        assertNotNull(resShowSchemas.rows);
+        assertEquals(0, resShowSchemas.rows.size());
+    }
     
     private void deleteRecursive(File f) {
         if (f.isDirectory()) {

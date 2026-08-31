@@ -20,6 +20,14 @@ import javax.crypto.spec.SecretKeySpec;
 
 public class SqlFunctions {
 
+    public static String getEngineVersion() {
+        try {
+            return com.mysql.pocketsql.BuildConfig.VERSION_NAME;
+        } catch (Throwable e) {
+            return "1.0.1";
+        }
+    }
+
     public interface Expression {
         Object evaluate(Map<String, Object> row, List<Map<String, Object>> groupRows, DatabaseEngine engine);
         boolean hasAggregate();
@@ -59,9 +67,25 @@ public class SqlFunctions {
         private final String columnName;
         public ColumnExpression(String columnName) { this.columnName = columnName; }
         @Override public Object evaluate(Map<String, Object> row, List<Map<String, Object>> groupRows, DatabaseEngine engine) {
-            if (row == null) return columnName;
+            if (columnName != null && (columnName.startsWith("@") || columnName.startsWith("@@"))) {
+                if (engine != null) {
+                    Object varVal = engine.getUserVariable(columnName);
+                    if (varVal != null) return varVal;
+                }
+            }
+            if (row == null) {
+                if (engine != null && columnName != null && (columnName.startsWith("@") || columnName.startsWith("@@"))) {
+                    Object varVal = engine.getUserVariable(columnName);
+                    if (varVal != null) return varVal;
+                }
+                return columnName;
+            }
             Object val = DatabaseEngine.getRowValue(row, columnName);
             if (val == null && !rowHasColumn(row, columnName)) {
+                if (engine != null && columnName != null && (columnName.startsWith("@") || columnName.startsWith("@@"))) {
+                    Object varVal = engine.getUserVariable(columnName);
+                    if (varVal != null) return varVal;
+                }
                 return columnName;
             }
             return val;
@@ -1581,11 +1605,7 @@ public class SqlFunctions {
             }
         }
         if ("VERSION".equals(name)) {
-            try {
-                return com.mysql.pocketsql.BuildConfig.VERSION_NAME;
-            } catch (Throwable e) {
-                return "1.0.1";
-            }
+            return getEngineVersion();
         }
         if ("CONNECTION_ID".equals(name)) {
             try {
@@ -2257,12 +2277,32 @@ public class SqlFunctions {
                 return new LiteralExpression(null);
             }
             if (matchSymbol("@")) {
+                String varPrefix = "@";
+                if (matchSymbol("@")) {
+                    varPrefix = "@@";
+                    if (matchKeyword("GLOBAL") || (peek().type == SqlToken.Type.IDENTIFIER && "GLOBAL".equalsIgnoreCase(peek().value))) {
+                        consume();
+                        if (matchSymbol(".")) {
+                            varPrefix = "@@GLOBAL.";
+                        }
+                    } else if (matchKeyword("SESSION") || (peek().type == SqlToken.Type.IDENTIFIER && "SESSION".equalsIgnoreCase(peek().value))) {
+                        consume();
+                        if (matchSymbol(".")) {
+                            varPrefix = "@@SESSION.";
+                        }
+                    } else if (matchKeyword("PERSIST") || (peek().type == SqlToken.Type.IDENTIFIER && "PERSIST".equalsIgnoreCase(peek().value))) {
+                        consume();
+                        if (matchSymbol(".")) {
+                            varPrefix = "@@PERSIST.";
+                        }
+                    }
+                }
                 SqlToken varNameTok = peek();
                 if (varNameTok.type != SqlToken.Type.IDENTIFIER && varNameTok.type != SqlToken.Type.KEYWORD) {
                     throw new RuntimeException("Expected variable name after '@'");
                 }
                 consume();
-                return new VariableExpression("@" + varNameTok.value);
+                return new VariableExpression(varPrefix + varNameTok.value);
             }
             if (t.type == SqlToken.Type.KEYWORD && "CASE".equalsIgnoreCase(t.value)) {
                 return parseCaseExpression();

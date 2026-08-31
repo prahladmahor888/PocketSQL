@@ -5,6 +5,7 @@
   <img src="https://img.shields.io/badge/Android-3DDC84?style=for-the-badge&logo=android&logoColor=white" alt="Android" />
   <img src="https://img.shields.io/badge/API_Server-Active-brightgreen?style=for-the-badge&logo=serverless&logoColor=white" alt="API Server" />
   <img src="https://img.shields.io/badge/Java-ED8B00?style=for-the-badge&logo=openjdk&logoColor=white" alt="Java" />
+  <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-yellow.svg?style=for-the-badge" alt="License: MIT" /></a>
   <img src="https://img.shields.io/badge/Made_in-India-FF9933?style=for-the-badge" alt="Made in India" />
   <img src="https://flagcdn.com/w40/in.png" width="28" height="20" alt="India Flag" style="vertical-align: middle;" />
 </p>
@@ -27,6 +28,10 @@ PocketSQL is a high-performance Android application running a **custom-built SQL
 - [📋 HTTP API Reference](#-http-api-reference)
 - [🛠️ Build & Installation Guide](#%EF%B8%8F-build--installation-guide)
 - [👨‍💻 Developer & Contributors](#-developer--contributors)
+- [🤝 Contributing Guide](CONTRIBUTING.md)
+- [📜 Code of Conduct](CODE_OF_CONDUCT.md)
+- [🔒 Security Policy](SECURITY.md)
+- [📄 License](LICENSE)
 
 ---
 

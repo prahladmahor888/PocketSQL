@@ -3247,7 +3247,7 @@ public class SqlEngineTest {
         // Verify App Version appears in syntax error output
         QueryResult rErr = engine.execute("SELECT * FROM;");
         assertFalse(rErr.success);
-        assertTrue(rErr.message.contains("(1.0.1)"));
+        assertTrue("Actual error message was: " + rErr.message, rErr.message != null && rErr.message.contains("(" + SqlFunctions.getEngineVersion() + ")"));
 
         engine.execute("DROP DATABASE test_subq_db;");
     }

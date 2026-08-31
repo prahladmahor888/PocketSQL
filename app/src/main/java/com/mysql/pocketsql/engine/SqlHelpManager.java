@@ -139,6 +139,16 @@ public class SqlHelpManager {
         HELP_MAP.put("TRIM()", "Strips leading and trailing spaces from a string value.\nSyntax: TRIM(string);\nExample: SELECT TRIM('  hello world  '); -- outputs 'hello world'");
         HELP_MAP.put("REPLACE()", "Replaces all occurrences of a specified substring within a string with a new substring.\nSyntax: REPLACE(str, old_sub, new_sub);\nExample: SELECT REPLACE('hello world', 'world', 'PocketSQL'); -- outputs 'hello PocketSQL'");
 
+        // CTE & Window Functions
+        HELP_MAP.put("WITH", "Common Table Expression (CTE) defining a temporary named result set for query reference.\nSyntax: WITH cte_name AS (SELECT ...) SELECT * FROM cte_name;\nExample: WITH HighSales AS (SELECT user_id, SUM(total) AS rev FROM orders GROUP BY user_id) SELECT * FROM HighSales WHERE rev > 1000;");
+        HELP_MAP.put("CTE", "Alias for Common Table Expression defined using WITH clause.\nExample: WITH RankedData AS (SELECT id, DENSE_RANK() OVER (ORDER BY score DESC) AS `rank` FROM test) SELECT * FROM RankedData WHERE `rank` <= 3;");
+        HELP_MAP.put("OVER()", "Specifies window partitioning and ordering for analytical window functions (DENSE_RANK, ROW_NUMBER, RANK).\nSyntax: function() OVER ([PARTITION BY col] [ORDER BY col ASC|DESC]);\nExample: SELECT name, DENSE_RANK() OVER (PARTITION BY dept ORDER BY salary DESC) AS `rank` FROM emp;");
+        HELP_MAP.put("DENSE_RANK()", "Window function returning consecutive rank numbers without gaps for tied values.\nSyntax: DENSE_RANK() OVER ([PARTITION BY col] ORDER BY col ASC|DESC);\nExample: SELECT name, salary, DENSE_RANK() OVER (PARTITION BY category ORDER BY salary DESC) AS `rank` FROM products;");
+        HELP_MAP.put("ROW_NUMBER()", "Window function returning sequential 1-based row index within partition.\nSyntax: ROW_NUMBER() OVER ([PARTITION BY col] ORDER BY col ASC|DESC);");
+        HELP_MAP.put("RANK()", "Window function returning rank numbers with gaps for tied scores.\nSyntax: RANK() OVER ([PARTITION BY col] ORDER BY col ASC|DESC);");
+        HELP_MAP.put("WITH ROLLUP", "Extension of GROUP BY to produce summary super-aggregate total rows.\nSyntax: SELECT category, SUM(sales) FROM products GROUP BY category WITH ROLLUP;");
+        HELP_MAP.put("DROP TABLE IF EXISTS", "Deletes a table safely without error if the table does not exist.\nSyntax: DROP TABLE IF EXISTS table_name;");
+
         // Functions - Date & Time
         HELP_MAP.put("NOW()", "Returns the current local system date and time.\nSyntax: NOW();\nExample: SELECT NOW(); -- outputs '2026-08-24 20:30:00'");
         HELP_MAP.put("CURDATE()", "Returns the current local system date.\nSyntax: CURDATE();\nExample: SELECT CURDATE(); -- outputs '2026-08-24'");
@@ -146,6 +156,10 @@ public class SqlHelpManager {
         HELP_MAP.put("DATE_FORMAT()", "Formats a date/time value according to a format string pattern.\nSyntax: DATE_FORMAT(date_expr, format_pattern);\nExample: SELECT DATE_FORMAT(NOW(), '%Y-%m-%d %H:%i:%s');");
         HELP_MAP.put("DATE_ADD()", "Adds a specified time unit interval to a date value.\nSyntax: DATE_ADD(date, INTERVAL expr unit);\nExample: SELECT DATE_ADD(NOW(), INTERVAL 7 DAY);");
         HELP_MAP.put("DATEDIFF()", "Calculates difference in days between two date expressions.\nSyntax: DATEDIFF(date1, date2);\nExample: SELECT DATEDIFF('2026-08-31', '2026-08-24'); -- outputs 7");
+        HELP_MAP.put("MONTHNAME()", "Returns full month name of a date string or timestamp.\nSyntax: MONTHNAME(date);\nExample: SELECT MONTHNAME('2026-08-31'); -- outputs 'August'");
+        HELP_MAP.put("YEAR()", "Extracts 4-digit year integer from a date value.\nSyntax: YEAR(date);\nExample: SELECT YEAR('2026-08-31'); -- outputs 2026");
+        HELP_MAP.put("MONTH()", "Extracts month integer (1-12) from a date value.\nSyntax: MONTH(date);\nExample: SELECT MONTH('2026-08-31'); -- outputs 8");
+        HELP_MAP.put("DAY()", "Extracts day of month integer (1-31) from a date value.\nSyntax: DAY(date);\nExample: SELECT DAY('2026-08-31'); -- outputs 31");
 
         // Functions - Mathematical & Aggregate
         HELP_MAP.put("ABS()", "Returns absolute non-negative value of a number.\nSyntax: ABS(number);\nExample: SELECT ABS(-42); -- outputs 42");

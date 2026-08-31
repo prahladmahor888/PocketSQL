@@ -47,11 +47,14 @@ public class DatabaseEngine {
 
     public long statementCount = 0L;
     public long totalExecutionTimeMs = 0L;
+    private final long startTimeMs = System.currentTimeMillis();
 
     final SqlPrivilegeManager privilegeManager;
     final SqlTransactionManager transactionManager;
     final SqlDatabaseManager databaseManager;
     public final SqlSystemDatabaseManager systemDbManager;
+
+    private final Map<String, Object> systemVariables = new LinkedHashMap<>();
 
     public DatabaseEngine(File baseDir) {
         this.storageEngine = new StorageEngine(baseDir);
@@ -61,8 +64,41 @@ public class DatabaseEngine {
         this.transactionManager = new SqlTransactionManager(this);
         this.databaseManager = new SqlDatabaseManager(this);
         this.systemDbManager = new SqlSystemDatabaseManager();
+        initDefaultSystemVariables();
         loadUsers();
         initializeSystemSchemas();
+    }
+
+    private void initDefaultSystemVariables() {
+        systemVariables.put("auto_increment_increment", "1");
+        systemVariables.put("autocommit", "ON");
+        systemVariables.put("character_set_client", "utf8mb4");
+        systemVariables.put("character_set_connection", "utf8mb4");
+        systemVariables.put("character_set_database", "utf8mb4");
+        systemVariables.put("character_set_results", "utf8mb4");
+        systemVariables.put("character_set_server", "utf8mb4");
+        systemVariables.put("character_set_system", "utf8mb3");
+        systemVariables.put("collation_connection", "utf8mb4_general_ci");
+        systemVariables.put("collation_database", "utf8mb4_general_ci");
+        systemVariables.put("collation_server", "utf8mb4_general_ci");
+        systemVariables.put("foreign_key_checks", "ON");
+        systemVariables.put("interactive_timeout", "28800");
+        systemVariables.put("license", "GPL");
+        systemVariables.put("log_bin", "OFF");
+        systemVariables.put("log_bin_trust_function_creators", "1");
+        systemVariables.put("max_allowed_packet", "67108864");
+        systemVariables.put("max_connections", "151");
+        systemVariables.put("net_buffer_length", "16384");
+        systemVariables.put("port", "3306");
+        systemVariables.put("protocol_version", "10");
+        systemVariables.put("sql_mode", "ONLY_FULL_GROUP_BY,STRICT_TRANS_TABLES,NO_ZERO_IN_DATE,NO_ZERO_DATE,ERROR_FOR_DIVISION_BY_ZERO,NO_ENGINE_SUBSTITUTION");
+        systemVariables.put("system_time_zone", "UTC");
+        systemVariables.put("time_zone", "SYSTEM");
+        systemVariables.put("version", SqlFunctions.getEngineVersion());
+        systemVariables.put("version_comment", "PocketSQL Server");
+        systemVariables.put("version_compile_os", "Android");
+        systemVariables.put("version_compile_machine", "arm64");
+        systemVariables.put("wait_timeout", "28800");
     }
 
     private void initializeSystemSchemas() {
@@ -161,7 +197,36 @@ public class DatabaseEngine {
 
     public Object getUserVariable(String name) {
         if (name == null) return null;
-        return userVariables.get(name.toLowerCase());
+        String cleanName = name.toLowerCase().trim();
+        if (cleanName.startsWith("@@global.")) {
+            return getSystemVariable(cleanName.substring(9));
+        } else if (cleanName.startsWith("@@session.")) {
+            return getSystemVariable(cleanName.substring(10));
+        } else if (cleanName.startsWith("@@persist.")) {
+            return getSystemVariable(cleanName.substring(10));
+        } else if (cleanName.startsWith("@@persist_only.")) {
+            return getSystemVariable(cleanName.substring(15));
+        } else if (cleanName.startsWith("@@")) {
+            return getSystemVariable(cleanName.substring(2));
+        } else if (cleanName.startsWith("@")) {
+            return userVariables.get(cleanName);
+        }
+        return getSystemVariable(cleanName);
+    }
+
+    public Object getSystemVariable(String name) {
+        if (name == null) return null;
+        String cleanName = name.toLowerCase().trim();
+        if (cleanName.startsWith("@@global.")) cleanName = cleanName.substring(9);
+        else if (cleanName.startsWith("@@session.")) cleanName = cleanName.substring(10);
+        else if (cleanName.startsWith("@@persist.")) cleanName = cleanName.substring(10);
+        else if (cleanName.startsWith("@@persist_only.")) cleanName = cleanName.substring(15);
+        else if (cleanName.startsWith("@@")) cleanName = cleanName.substring(2);
+
+        Object val = systemVariables.get(cleanName);
+        if (val != null) return val;
+        if ("foreign_key_checks".equals(cleanName)) return foreignKeyChecks ? "1" : "0";
+        return null;
     }
 
     public String getCurrentHost() {
@@ -274,11 +339,15 @@ public class DatabaseEngine {
                 result.affectedRows,
                 duration
             );
-        } catch (SqlSyntaxException e) {
-            String ver = "1.0.1";
-            try { ver = com.mysql.pocketsql.BuildConfig.VERSION_NAME; } catch (Throwable ignored) {}
-            return QueryResult.createError("ERROR 1064 (42000): You have an error in your SQL syntax; check the manual that corresponds to your PocketSQL server version (" + ver + ") for the right syntax near '" + e.getMessage() + "'");
         } catch (Throwable e) {
+            Throwable syntaxError = e;
+            while (syntaxError != null && !(syntaxError instanceof SqlSyntaxException)) {
+                syntaxError = syntaxError.getCause();
+            }
+            if (syntaxError instanceof SqlSyntaxException) {
+                String ver = SqlFunctions.getEngineVersion();
+                return QueryResult.createError("ERROR 1064 (42000): You have an error in your SQL syntax; check the manual that corresponds to your PocketSQL server version (" + ver + ") for the right syntax near '" + syntaxError.getMessage() + "'");
+            }
             com.mysql.pocketsql.engine.SqlLog.printStackTrace(e);
             String msg = e.getMessage() != null ? e.getMessage() : "Unknown error";
             if (msg.startsWith("ERROR ") || msg.startsWith("ERROR:")) {
@@ -350,7 +419,11 @@ public class DatabaseEngine {
     }
 
     public QueryResult showDatabases() throws Exception {
-        return databaseManager.showDatabases();
+        return databaseManager.showDatabases(null, null);
+    }
+
+    public QueryResult showDatabases(String likePattern, Clause.Where where) throws Exception {
+        return databaseManager.showDatabases(likePattern, where);
     }
 
     // --- Table Commands execution ---
@@ -723,33 +796,33 @@ public class DatabaseEngine {
     }
 
     public QueryResult dropTable(String tableName, boolean ifExists) throws Exception {
-        tableName = resolveTableName(tableName);
-        verifyPrivilege("DROP", activeDatabaseName, tableName);
+        String resolvedName = resolveTableName(tableName);
+        verifyPrivilege("DROP", activeDatabaseName, resolvedName != null ? resolvedName : tableName);
         ensureActiveSchema();
 
-        if (!activeSchemaJson.has(tableName)) {
+        if (resolvedName == null || !activeSchemaJson.has(resolvedName)) {
             if (ifExists) {
-                return QueryResult.createSuccess("Table does not exist (ignored)", 0, 0);
+                return QueryResult.createSuccess("Query OK, 0 rows affected", 0, 0);
             }
-            return QueryResult.createError("Error: Table '" + tableName + "' does not exist");
+            return QueryResult.createError("ERROR 1051 (42000): Unknown table '" + activeDatabaseName + "." + tableName + "'");
         }
 
-        JSONObject ts = activeSchemaJson.getJSONObject(tableName);
+        JSONObject ts = activeSchemaJson.getJSONObject(resolvedName);
         if (ts.optBoolean("is_view", false)) {
-            return QueryResult.createError("Error: '" + tableName + "' is a VIEW, use DROP VIEW");
+            return QueryResult.createError("ERROR 1347 (42000): '" + activeDatabaseName + "." + resolvedName + "' is a VIEW, use DROP VIEW");
         }
 
-        activeSchemaJson.remove(tableName);
+        activeSchemaJson.remove(resolvedName);
         storageEngine.writeSchema(activeDatabaseName, activeSchemaJson);
-        storageEngine.deleteTableFile(activeDatabaseName, tableName);
-        tableCache.remove(tableName);
+        storageEngine.deleteTableFile(activeDatabaseName, resolvedName);
+        tableCache.remove(resolvedName);
 
-        return QueryResult.createSuccess("Table dropped successfully", 0, 0);
+        return QueryResult.createSuccess("Query OK, 0 rows affected", 0, 0);
     }
 
     public QueryResult dropTables(List<String> tableNames, boolean ifExists) throws Exception {
         if (tableNames == null || tableNames.isEmpty()) {
-            return QueryResult.createSuccess("No tables specified to drop", 0, 0);
+            return QueryResult.createSuccess("Query OK, 0 rows affected", 0, 0);
         }
         QueryResult lastRes = null;
         for (String tbl : tableNames) {
@@ -758,7 +831,7 @@ public class DatabaseEngine {
                 return lastRes;
             }
         }
-        return QueryResult.createSuccess("Table(s) dropped successfully", 0, 0);
+        return lastRes != null ? lastRes : QueryResult.createSuccess("Query OK, 0 rows affected", 0, 0);
     }
 
     public QueryResult showTables() throws Exception {
@@ -1718,21 +1791,50 @@ public class DatabaseEngine {
 
         if ("INFORMATION_SCHEMA.ROUTINES".equalsIgnoreCase(tableName)) {
             List<String> cols = new ArrayList<>();
+            cols.add("SPECIFIC_NAME");
+            cols.add("ROUTINE_CATALOG");
+            cols.add("ROUTINE_SCHEMA");
             cols.add("ROUTINE_NAME");
             cols.add("ROUTINE_TYPE");
-            cols.add("ROUTINE_SCHEMA");
-            cols.add("ROUTINE_DEFINITION");
             cols.add("DATA_TYPE");
-            
+            cols.add("CHARACTER_MAXIMUM_LENGTH");
+            cols.add("CHARACTER_OCTET_LENGTH");
+            cols.add("NUMERIC_PRECISION");
+            cols.add("NUMERIC_SCALE");
+            cols.add("DATETIME_PRECISION");
+            cols.add("CHARACTER_SET_NAME");
+            cols.add("COLLATION_NAME");
+            cols.add("DTD_IDENTIFIER");
+            cols.add("ROUTINE_BODY");
+            cols.add("ROUTINE_DEFINITION");
+            cols.add("EXTERNAL_NAME");
+            cols.add("EXTERNAL_LANGUAGE");
+            cols.add("PARAMETER_STYLE");
+            cols.add("IS_DETERMINISTIC");
+            cols.add("SQL_DATA_ACCESS");
+            cols.add("SQL_PATH");
+            cols.add("SECURITY_TYPE");
+            cols.add("CREATED");
+            cols.add("LAST_ALTERED");
+            cols.add("SQL_MODE");
+            cols.add("ROUTINE_COMMENT");
+            cols.add("DEFINER");
+            cols.add("CHARACTER_SET_CLIENT");
+            cols.add("COLLATION_CONNECTION");
+            cols.add("DATABASE_COLLATION");
+
             List<String> typs = new ArrayList<>();
+            typs.add("VARCHAR");typs.add("VARCHAR");typs.add("VARCHAR");typs.add("VARCHAR");typs.add("VARCHAR");
+            typs.add("VARCHAR");typs.add("BIGINT");typs.add("BIGINT");typs.add("BIGINT");typs.add("BIGINT");
+            typs.add("BIGINT");typs.add("VARCHAR");typs.add("VARCHAR");typs.add("LONGTEXT");typs.add("VARCHAR");
+            typs.add("LONGTEXT");typs.add("VARCHAR");typs.add("VARCHAR");typs.add("VARCHAR");typs.add("VARCHAR");
+            typs.add("VARCHAR");typs.add("VARCHAR");typs.add("VARCHAR");typs.add("DATETIME");typs.add("DATETIME");
+            typs.add("VARCHAR");typs.add("TEXT");typs.add("VARCHAR");typs.add("VARCHAR");typs.add("VARCHAR");
             typs.add("VARCHAR");
-            typs.add("VARCHAR");
-            typs.add("VARCHAR");
-            typs.add("LONGTEXT");
-            typs.add("VARCHAR");
-            
+
             TableData td = new TableData(tableName, cols, typs);
             if (activeSchemaJson != null) {
+                String defaultCreated = "2026-08-30 00:00:00";
                 // Add procedures
                 JSONObject procs = activeSchemaJson.optJSONObject("__procedures__");
                 if (procs != null) {
@@ -1741,16 +1843,45 @@ public class DatabaseEngine {
                         String key = keys.next();
                         JSONObject procObj = procs.optJSONObject(key);
                         String definition = procObj != null ? procObj.optString("definition", procObj.optString("body", "")) : "";
+                        String created = procObj != null ? procObj.optString("created", defaultCreated) : defaultCreated;
+                        String lastAltered = procObj != null ? procObj.optString("last_altered", created) : created;
+
                         Map<String, Object> row = new HashMap<>();
+                        row.put("SPECIFIC_NAME", key);
+                        row.put("ROUTINE_CATALOG", "def");
+                        row.put("ROUTINE_SCHEMA", activeDatabaseName != null ? activeDatabaseName : "ecommerce");
                         row.put("ROUTINE_NAME", key);
                         row.put("ROUTINE_TYPE", "PROCEDURE");
-                        row.put("ROUTINE_SCHEMA", activeDatabaseName != null ? activeDatabaseName : "ecommerce");
-                        row.put("ROUTINE_DEFINITION", SqlFormatter.formatSql(definition));
                         row.put("DATA_TYPE", null);
+                        row.put("CHARACTER_MAXIMUM_LENGTH", null);
+                        row.put("CHARACTER_OCTET_LENGTH", null);
+                        row.put("NUMERIC_PRECISION", null);
+                        row.put("NUMERIC_SCALE", null);
+                        row.put("DATETIME_PRECISION", null);
+                        row.put("CHARACTER_SET_NAME", "utf8mb4");
+                        row.put("COLLATION_NAME", "utf8mb4_general_ci");
+                        row.put("DTD_IDENTIFIER", null);
+                        row.put("ROUTINE_BODY", "SQL");
+                        row.put("ROUTINE_DEFINITION", SqlFormatter.formatSql(definition));
+                        row.put("EXTERNAL_NAME", null);
+                        row.put("EXTERNAL_LANGUAGE", "SQL");
+                        row.put("PARAMETER_STYLE", "SQL");
+                        row.put("IS_DETERMINISTIC", "NO");
+                        row.put("SQL_DATA_ACCESS", "CONTAINS SQL");
+                        row.put("SQL_PATH", null);
+                        row.put("SECURITY_TYPE", "DEFINER");
+                        row.put("CREATED", created);
+                        row.put("LAST_ALTERED", lastAltered);
+                        row.put("SQL_MODE", "ONLY_FULL_GROUP_BY,STRICT_TRANS_TABLES,NO_ZERO_IN_DATE,NO_ZERO_DATE,ERROR_FOR_DIVISION_BY_ZERO,NO_ENGINE_SUBSTITUTION");
+                        row.put("ROUTINE_COMMENT", "");
+                        row.put("DEFINER", currentUser != null ? currentUser + "@localhost" : "root@localhost");
+                        row.put("CHARACTER_SET_CLIENT", "utf8mb4");
+                        row.put("COLLATION_CONNECTION", "utf8mb4_general_ci");
+                        row.put("DATABASE_COLLATION", "utf8mb4_general_ci");
                         td.rows.add(row);
                     }
                 }
-                
+
                 // Add functions
                 JSONObject fns = activeSchemaJson.optJSONObject("__functions__");
                 if (fns != null) {
@@ -1771,15 +1902,104 @@ public class DatabaseEngine {
                                     }
                                 }
                                 definition = sb.toString().trim();
+                            } else {
+                                definition = funcObj.optString("definition", "");
                             }
                         }
-                        
+                        String created = funcObj != null ? funcObj.optString("created", defaultCreated) : defaultCreated;
+                        String lastAltered = funcObj != null ? funcObj.optString("last_altered", created) : created;
+
                         Map<String, Object> row = new HashMap<>();
+                        row.put("SPECIFIC_NAME", key);
+                        row.put("ROUTINE_CATALOG", "def");
+                        row.put("ROUTINE_SCHEMA", activeDatabaseName != null ? activeDatabaseName : "ecommerce");
                         row.put("ROUTINE_NAME", key);
                         row.put("ROUTINE_TYPE", "FUNCTION");
-                        row.put("ROUTINE_SCHEMA", activeDatabaseName != null ? activeDatabaseName : "ecommerce");
-                        row.put("ROUTINE_DEFINITION", SqlFormatter.formatSql(definition));
                         row.put("DATA_TYPE", returnType);
+                        row.put("CHARACTER_MAXIMUM_LENGTH", null);
+                        row.put("CHARACTER_OCTET_LENGTH", null);
+                        row.put("NUMERIC_PRECISION", null);
+                        row.put("NUMERIC_SCALE", null);
+                        row.put("DATETIME_PRECISION", null);
+                        row.put("CHARACTER_SET_NAME", "utf8mb4");
+                        row.put("COLLATION_NAME", "utf8mb4_general_ci");
+                        row.put("DTD_IDENTIFIER", returnType);
+                        row.put("ROUTINE_BODY", "SQL");
+                        row.put("ROUTINE_DEFINITION", SqlFormatter.formatSql(definition));
+                        row.put("EXTERNAL_NAME", null);
+                        row.put("EXTERNAL_LANGUAGE", "SQL");
+                        row.put("PARAMETER_STYLE", "SQL");
+                        row.put("IS_DETERMINISTIC", "NO");
+                        row.put("SQL_DATA_ACCESS", "CONTAINS SQL");
+                        row.put("SQL_PATH", null);
+                        row.put("SECURITY_TYPE", "DEFINER");
+                        row.put("CREATED", created);
+                        row.put("LAST_ALTERED", lastAltered);
+                        row.put("SQL_MODE", "ONLY_FULL_GROUP_BY,STRICT_TRANS_TABLES,NO_ZERO_IN_DATE,NO_ZERO_DATE,ERROR_FOR_DIVISION_BY_ZERO,NO_ENGINE_SUBSTITUTION");
+                        row.put("ROUTINE_COMMENT", "");
+                        row.put("DEFINER", currentUser != null ? currentUser + "@localhost" : "root@localhost");
+                        row.put("CHARACTER_SET_CLIENT", "utf8mb4");
+                        row.put("COLLATION_CONNECTION", "utf8mb4_general_ci");
+                        row.put("DATABASE_COLLATION", "utf8mb4_general_ci");
+                        td.rows.add(row);
+                    }
+                }
+            }
+            return td;
+        }
+
+        if ("sqlite_master".equalsIgnoreCase(tableName) || "sqlite_schema".equalsIgnoreCase(tableName)) {
+            List<String> cols = java.util.Arrays.asList("type", "name", "tbl_name", "rootpage", "sql");
+            List<String> typs = java.util.Arrays.asList("TEXT", "TEXT", "TEXT", "INTEGER", "TEXT");
+            TableData td = new TableData(tableName, cols, typs);
+
+            if (activeSchemaJson != null) {
+                Iterator<String> tblKeys = activeSchemaJson.keys();
+                while (tblKeys.hasNext()) {
+                    String tblName = tblKeys.next();
+                    if (tblName.startsWith("__")) continue;
+                    JSONObject tblObj = activeSchemaJson.optJSONObject(tblName);
+                    if (tblObj == null) continue;
+                    boolean isView = tblObj.optBoolean("is_view", false);
+
+                    StringBuilder sqlSb = new StringBuilder();
+                    if (isView) {
+                        sqlSb.append("CREATE VIEW ").append(tblName).append(" AS ").append(tblObj.optString("query", ""));
+                    } else {
+                        sqlSb.append("CREATE TABLE ").append(tblName).append(" (");
+                        JSONArray cArr = tblObj.optJSONArray("columns");
+                        JSONArray tArr = tblObj.optJSONArray("types");
+                        if (cArr != null && tArr != null) {
+                            for (int i = 0; i < cArr.length(); i++) {
+                                if (i > 0) sqlSb.append(", ");
+                                sqlSb.append(cArr.optString(i)).append(" ").append(tArr.optString(i));
+                            }
+                        }
+                        sqlSb.append(")");
+                    }
+
+                    Map<String, Object> row = new HashMap<>();
+                    row.put("type", isView ? "view" : "table");
+                    row.put("name", tblName);
+                    row.put("tbl_name", tblName);
+                    row.put("rootpage", 0L);
+                    row.put("sql", sqlSb.toString());
+                    td.rows.add(row);
+                }
+
+                // Add triggers
+                JSONObject triggers = activeSchemaJson.optJSONObject("__triggers__");
+                if (triggers != null) {
+                    Iterator<String> trgKeys = triggers.keys();
+                    while (trgKeys.hasNext()) {
+                        String trgName = trgKeys.next();
+                        JSONObject trgObj = triggers.optJSONObject(trgName);
+                        Map<String, Object> row = new HashMap<>();
+                        row.put("type", "trigger");
+                        row.put("name", trgName);
+                        row.put("tbl_name", trgObj != null ? trgObj.optString("table", "") : "");
+                        row.put("rootpage", 0L);
+                        row.put("sql", trgObj != null ? trgObj.optString("definition", "") : "");
                         td.rows.add(row);
                     }
                 }
@@ -2560,11 +2780,28 @@ public class DatabaseEngine {
 
 
     private Object getRowValueOrEvaluate(Map<String, Object> r, String expr) {
+        return getRowValueOrEvaluateWithAlias(r, expr, null);
+    }
+
+    private Object getRowValueOrEvaluateWithAlias(Map<String, Object> r, String expr, Map<String, String> aliases) {
         if (expr == null || expr.trim().isEmpty()) return null;
-        Object val = getRowValue(r, expr);
-        if (val == null && !r.containsKey(expr)) {
+        Object val = getRowValueWithAlias(r, expr, aliases);
+        if (val != null) return val;
+
+        String targetExpr = expr;
+        if (aliases != null) {
+            for (Map.Entry<String, String> entry : aliases.entrySet()) {
+                if (entry.getValue().equalsIgnoreCase(expr)) {
+                    targetExpr = entry.getKey();
+                    break;
+                }
+            }
+        }
+
+        val = getRowValue(r, targetExpr);
+        if (val == null && !r.containsKey(targetExpr)) {
             try {
-                val = SqlFunctions.evaluate(expr, r, this);
+                val = SqlFunctions.evaluate(targetExpr, r, this);
             } catch (Exception ignored) {}
         }
         return val;
@@ -3431,15 +3668,28 @@ public class DatabaseEngine {
         if (select.groupBy != null) {
             List<String> gCols = select.groupBy.columns != null ? select.groupBy.columns : java.util.Collections.singletonList(select.groupBy.column);
             for (String gCol : gCols) {
-                if (gCol != null && gCol.contains("(")) {
-                    try {
-                        SqlFunctions.Expression expr = SqlFunctions.parse(gCol);
-                        expr.collectColumns(referencedCols);
-                    } catch (Exception ignored) {
+                if (gCol != null) {
+                    String realExpr = gCol;
+                    if (select.aliases != null) {
+                        for (Map.Entry<String, String> entry : select.aliases.entrySet()) {
+                            if (entry.getValue().equalsIgnoreCase(gCol)) {
+                                realExpr = entry.getKey();
+                                break;
+                            }
+                        }
+                    }
+                    if (realExpr.contains("(")) {
+                        try {
+                            SqlFunctions.Expression expr = SqlFunctions.parse(realExpr);
+                            expr.collectColumns(referencedCols);
+                        } catch (Exception ignored) {
+                            referencedCols.add(realExpr);
+                        }
+                    } else if (!gCol.equalsIgnoreCase(realExpr)) {
+                        referencedCols.add(realExpr);
+                    } else {
                         referencedCols.add(gCol);
                     }
-                } else if (gCol != null) {
-                    referencedCols.add(gCol);
                 }
             }
         }
@@ -3475,14 +3725,6 @@ public class DatabaseEngine {
         }
 
         // 4. Validate referenced columns (which cannot be projection aliases)
-        for (String col : referencedCols) {
-            if (col == null || col.trim().isEmpty()) continue;
-            if (!isValidColumnReference(col, tableColumnsMap, allUnqualifiedColumns, localVariables)) {
-                throw new Exception("Unknown column '" + col + "' in 'field list'");
-            }
-        }
-
-        // 5. Validate ORDER BY columns (which CAN be projection aliases)
         List<String> projectionAliases = new ArrayList<>();
         if (select.aliases != null) {
             for (String alias : select.aliases.values()) {
@@ -3490,9 +3732,36 @@ public class DatabaseEngine {
             }
         }
 
-        for (String col : orderByCols) {
+        for (String col : referencedCols) {
+            if (col == null || col.trim().isEmpty()) continue;
             if (projectionAliases.contains(col.toLowerCase())) {
                 continue;
+            }
+            if (!isValidColumnReference(col, tableColumnsMap, allUnqualifiedColumns, localVariables)) {
+                throw new Exception("Unknown column '" + col + "' in 'field list'");
+            }
+        }
+
+        // 5. Validate ORDER BY columns (which CAN be projection aliases or function expressions)
+        for (String col : orderByCols) {
+            if (col == null || col.trim().isEmpty()) continue;
+            if (projectionAliases.contains(col.toLowerCase())) {
+                continue;
+            }
+            if (col.contains("(")) {
+                try {
+                    SqlFunctions.Expression expr = SqlFunctions.parse(col);
+                    List<String> exprCols = new ArrayList<>();
+                    expr.collectColumns(exprCols);
+                    for (String ec : exprCols) {
+                        if (!isValidColumnReference(ec, tableColumnsMap, allUnqualifiedColumns, localVariables)) {
+                            throw new Exception("Unknown column '" + ec + "' in 'order clause'");
+                        }
+                    }
+                    continue;
+                } catch (Exception e) {
+                    if (e.getMessage() != null && e.getMessage().contains("Unknown column")) throw e;
+                }
             }
             if (!isValidColumnReference(col, tableColumnsMap, allUnqualifiedColumns, localVariables)) {
                 throw new Exception("Unknown column '" + col + "' in 'order clause'");
@@ -3991,12 +4260,12 @@ public class DatabaseEngine {
                 for (Map<String, Object> row : joinedRows) {
                     Object key;
                     if (gCols.size() == 1) {
-                        key = getRowValueOrEvaluate(row, gCols.get(0));
+                        key = getRowValueOrEvaluateWithAlias(row, gCols.get(0), select.aliases);
                         if (key == null) key = "NULL";
                     } else {
                         List<Object> compositeKey = new ArrayList<>();
                         for (String col : gCols) {
-                            Object val = getRowValueOrEvaluate(row, col);
+                            Object val = getRowValueOrEvaluateWithAlias(row, col, select.aliases);
                             compositeKey.add(val == null ? "NULL" : val);
                         }
                         key = compositeKey;
@@ -4033,12 +4302,12 @@ public class DatabaseEngine {
                         if (prefixLen == 0) {
                             rKey = "ROLLUP_TOTAL";
                         } else if (prefixLen == 1) {
-                            rKey = getRowValueOrEvaluate(row, gCols.get(0));
+                            rKey = getRowValueOrEvaluateWithAlias(row, gCols.get(0), select.aliases);
                             if (rKey == null) rKey = "NULL";
                         } else {
                             List<Object> compositeKey = new ArrayList<>();
                             for (int i = 0; i < prefixLen; i++) {
-                                Object val = getRowValueOrEvaluate(row, gCols.get(i));
+                                Object val = getRowValueOrEvaluateWithAlias(row, gCols.get(i), select.aliases);
                                 compositeKey.add(val == null ? "NULL" : val);
                             }
                             rKey = compositeKey;
@@ -4118,8 +4387,8 @@ public class DatabaseEngine {
                         String colType = colTypes[i];
                         String collation = collations[i];
 
-                        Object v1 = getRowValueWithAlias(r1, orderByCol, select.aliases);
-                        Object v2 = getRowValueWithAlias(r2, orderByCol, select.aliases);
+                        Object v1 = getRowValueOrEvaluateWithAlias(r1, orderByCol, select.aliases);
+                        Object v2 = getRowValueOrEvaluateWithAlias(r2, orderByCol, select.aliases);
 
                         if (v1 == null && v2 == null) continue;
                         if (v1 == null) return orderAsc ? -1 : 1;
@@ -6851,19 +7120,293 @@ public class DatabaseEngine {
                 enabled = false;
             }
             this.foreignKeyChecks = enabled;
+            systemVariables.put("foreign_key_checks", enabled ? "1" : "0");
             return QueryResult.createSuccess("Variable 'foreign_key_checks' set to " + (enabled ? "1" : "0"), 0, 0);
-        } else if ("NAMES".equals(nameUpper) || "CHARACTER_SET".equals(nameUpper) || "CHARACTER_SET_CLIENT".equals(nameUpper) || "CHARACTER_SET_RESULTS".equals(nameUpper) || "CHARACTER_SET_CONNECTION".equals(nameUpper)) {
-            return QueryResult.createSuccess("Variable '" + name.toLowerCase() + "' set successfully", 0, 0);
         } else if (name.startsWith("@")) {
             userVariables.put(name.toLowerCase(), value);
             return QueryResult.createSuccess("Variable '" + name.toLowerCase() + "' set to " + (value != null ? value.toString() : "null"), 0, 0);
         } else {
-            return QueryResult.createSuccess("Variable '" + name.toLowerCase() + "' set to " + (value != null ? value.toString() : "null"), 0, 0);
+            String valStr = value != null ? value.toString() : "null";
+            systemVariables.put(name.toLowerCase(), valStr);
+            return QueryResult.createSuccess("Variable '" + name.toLowerCase() + "' set to " + valStr, 0, 0);
         }
+    }
+
+    public QueryResult showVariables(String likePattern, Clause.Where where) {
+        List<String> cols = java.util.Arrays.asList("Variable_name", "Value");
+        List<String> types = java.util.Arrays.asList("VARCHAR(64)", "VARCHAR(1024)");
+        List<Map<String, Object>> rows = new ArrayList<>();
+
+        for (Map.Entry<String, Object> entry : systemVariables.entrySet()) {
+            String varName = entry.getKey();
+            String varVal = entry.getValue() != null ? entry.getValue().toString() : "";
+
+            if (likePattern != null && !likePattern.trim().isEmpty()) {
+                if (!matchesLike(varName, likePattern.trim())) {
+                    continue;
+                }
+            }
+
+            Map<String, Object> row = new LinkedHashMap<>();
+            row.put("Variable_name", varName);
+            row.put("Value", varVal);
+
+            if (where != null && !where.evaluate(row, "utf8mb4_general_ci", this)) {
+                continue;
+            }
+
+            rows.add(row);
+        }
+
+        return QueryResult.createSelectSuccess(cols, types, rows, 0);
+    }
+
+    public QueryResult showStatus(String likePattern, Clause.Where where) {
+        List<String> cols = java.util.Arrays.asList("Variable_name", "Value");
+        List<String> types = java.util.Arrays.asList("VARCHAR(64)", "VARCHAR(1024)");
+        List<Map<String, Object>> rows = new ArrayList<>();
+
+        Map<String, String> statusMap = new LinkedHashMap<>();
+        statusMap.put("Uptime", String.valueOf((System.currentTimeMillis() - startTimeMs) / 1000));
+        statusMap.put("Threads_connected", "1");
+        statusMap.put("Threads_running", "1");
+        statusMap.put("Questions", String.valueOf(statementCount));
+        statusMap.put("Slow_queries", "0");
+        statusMap.put("Opens", "1");
+        statusMap.put("Flush_commands", "1");
+        statusMap.put("Open_tables", "1");
+        statusMap.put("Queries_per_second_avg", "0.000");
+
+        for (Map.Entry<String, String> entry : statusMap.entrySet()) {
+            String name = entry.getKey();
+            String val = entry.getValue();
+
+            if (likePattern != null && !likePattern.trim().isEmpty()) {
+                if (!matchesLike(name, likePattern.trim())) continue;
+            }
+
+            Map<String, Object> row = new LinkedHashMap<>();
+            row.put("Variable_name", name);
+            row.put("Value", val);
+
+            if (where != null && !where.evaluate(row, "utf8mb4_general_ci", this)) continue;
+            rows.add(row);
+        }
+
+        return QueryResult.createSelectSuccess(cols, types, rows, 0);
+    }
+
+    public QueryResult showWarnings() {
+        List<String> cols = java.util.Arrays.asList("Level", "Code", "Message");
+        List<String> types = java.util.Arrays.asList("VARCHAR(10)", "INT", "VARCHAR(1024)");
+        List<Map<String, Object>> rows = new ArrayList<>();
+        return QueryResult.createSelectSuccess(cols, types, rows, 0);
+    }
+
+    public QueryResult showErrors() {
+        List<String> cols = java.util.Arrays.asList("Level", "Code", "Message");
+        List<String> types = java.util.Arrays.asList("VARCHAR(10)", "INT", "VARCHAR(1024)");
+        List<Map<String, Object>> rows = new ArrayList<>();
+        return QueryResult.createSelectSuccess(cols, types, rows, 0);
+    }
+
+    public QueryResult showProcesslist() {
+        List<String> cols = java.util.Arrays.asList("Id", "User", "Host", "db", "Command", "Time", "State", "Info");
+        List<String> types = java.util.Arrays.asList("INT", "VARCHAR(64)", "VARCHAR(64)", "VARCHAR(64)", "VARCHAR(16)", "INT", "VARCHAR(64)", "TEXT");
+        List<Map<String, Object>> rows = new ArrayList<>();
+        Map<String, Object> r = new LinkedHashMap<>();
+        r.put("Id", 1L);
+        r.put("User", currentUser != null ? currentUser : "root");
+        r.put("Host", currentHost != null ? currentHost : "localhost");
+        r.put("db", activeDatabaseName != null ? activeDatabaseName : "NULL");
+        r.put("Command", "Query");
+        r.put("Time", 0L);
+        r.put("State", "executing");
+        r.put("Info", "SHOW PROCESSLIST");
+        rows.add(r);
+        return QueryResult.createSelectSuccess(cols, types, rows, 0);
+    }
+
+    public QueryResult showGrants(String userHost) {
+        String targetUser = currentUser != null ? currentUser : "root";
+        String targetHost = currentHost != null ? currentHost : "localhost";
+        if (userHost != null && userHost.contains("@")) {
+            String[] parts = userHost.split("@");
+            targetUser = parts[0].replace("'", "");
+            targetHost = parts[1].replace("'", "");
+        }
+        String grantCol = "Grants for " + targetUser + "@" + targetHost;
+        List<String> cols = Collections.singletonList(grantCol);
+        List<String> types = Collections.singletonList("VARCHAR(1024)");
+        List<Map<String, Object>> rows = new ArrayList<>();
+        Map<String, Object> r = new LinkedHashMap<>();
+        r.put(grantCol, "GRANT ALL PRIVILEGES ON *.* TO '" + targetUser + "'@'" + targetHost + "' WITH GRANT OPTION");
+        rows.add(r);
+        return QueryResult.createSelectSuccess(cols, types, rows, 0);
+    }
+
+    private boolean matchesLike(String text, String pattern) {
+        if (text == null || pattern == null) return false;
+        String regex = pattern
+            .replace("\\", "\\\\")
+            .replace(".", "\\.")
+            .replace("+", "\\+")
+            .replace("*", "\\*")
+            .replace("?", "\\?")
+            .replace("^", "\\^")
+            .replace("$", "\\$")
+            .replace("(", "\\(")
+            .replace(")", "\\)")
+            .replace("[", "\\[")
+            .replace("]", "\\]")
+            .replace("{", "\\{")
+            .replace("}", "\\}")
+            .replace("|", "\\|")
+            .replace("%", ".*")
+            .replace("_", ".");
+        return text.matches("(?i)" + regex);
     }
 
     public QueryResult help(String topic) throws Exception {
         return SqlHelpManager.getHelp(topic);
+    }
+
+    public QueryResult pragma(String pragmaName, String arg) throws Exception {
+        if (pragmaName == null) {
+            throw new Exception("PRAGMA name cannot be null");
+        }
+        String pName = pragmaName.toLowerCase();
+        ensureActiveSchema();
+
+        if ("table_info".equals(pName)) {
+            if (arg == null || arg.trim().isEmpty()) {
+                throw new Exception("PRAGMA table_info requires a table name");
+            }
+            String tableName = arg.trim().replace("'", "").replace("\"", "").replace("`", "");
+            if (activeSchemaJson == null || !activeSchemaJson.has(tableName)) {
+                throw new Exception("Table '" + tableName + "' does not exist");
+            }
+
+            JSONObject ts = activeSchemaJson.getJSONObject(tableName);
+            JSONArray colArr = ts.getJSONArray("columns");
+            JSONArray typArr = ts.getJSONArray("types");
+            JSONObject nulls = ts.optJSONObject("nullables");
+            JSONObject defs = ts.optJSONObject("defaults");
+            String primaryKey = ts.optString("primary_key", "");
+
+            List<String> cols = java.util.Arrays.asList("cid", "name", "type", "notnull", "dflt_value", "pk");
+            List<String> types = java.util.Arrays.asList("INT", "TEXT", "TEXT", "INT", "TEXT", "INT");
+            List<Map<String, Object>> rows = new ArrayList<>();
+
+            for (int i = 0; i < colArr.length(); i++) {
+                String colName = colArr.getString(i);
+                String colType = typArr.getString(i);
+                boolean isNull = nulls != null ? nulls.optBoolean(colName, true) : true;
+                Object defVal = defs != null ? defs.opt(colName) : null;
+                boolean isPri = colName.equalsIgnoreCase(primaryKey);
+
+                Map<String, Object> r = new LinkedHashMap<>();
+                r.put("cid", i);
+                r.put("name", colName);
+                r.put("type", colType);
+                r.put("notnull", isNull ? 0 : 1);
+                r.put("dflt_value", defVal != null && defVal != JSONObject.NULL ? defVal.toString() : null);
+                r.put("pk", isPri ? 1 : 0);
+                rows.add(r);
+            }
+            return QueryResult.createSelectSuccess(cols, types, rows, 0);
+        } else if ("database_list".equals(pName)) {
+            List<String> cols = java.util.Arrays.asList("seq", "name", "file");
+            List<String> types = java.util.Arrays.asList("INT", "TEXT", "TEXT");
+            List<Map<String, Object>> rows = new ArrayList<>();
+            Map<String, Object> r = new LinkedHashMap<>();
+            r.put("seq", 0);
+            r.put("name", activeDatabaseName != null ? activeDatabaseName : "main");
+            r.put("file", "");
+            rows.add(r);
+            return QueryResult.createSelectSuccess(cols, types, rows, 0);
+        } else if ("index_list".equals(pName)) {
+            List<String> cols = java.util.Arrays.asList("seq", "name", "unique", "origin", "partial");
+            List<String> types = java.util.Arrays.asList("INT", "TEXT", "INT", "TEXT", "INT");
+            List<Map<String, Object>> rows = new ArrayList<>();
+
+            if (arg != null && !arg.trim().isEmpty() && activeSchemaJson != null) {
+                String tableName = arg.trim().replace("'", "").replace("\"", "").replace("`", "");
+                if (activeSchemaJson.has(tableName)) {
+                    JSONObject ts = activeSchemaJson.getJSONObject(tableName);
+                    JSONObject indexesObj = ts.optJSONObject("indexes");
+                    if (indexesObj != null) {
+                        Iterator<String> keys = indexesObj.keys();
+                        int seq = 0;
+                        while (keys.hasNext()) {
+                            String idxName = keys.next();
+                            JSONObject idxMeta = indexesObj.getJSONObject(idxName);
+                            boolean isUnique = idxMeta.optBoolean("unique", false);
+                            Map<String, Object> r = new LinkedHashMap<>();
+                            r.put("seq", seq++);
+                            r.put("name", idxName);
+                            r.put("unique", isUnique ? 1 : 0);
+                            r.put("origin", "c");
+                            r.put("partial", 0);
+                            rows.add(r);
+                        }
+                    }
+                }
+            }
+            return QueryResult.createSelectSuccess(cols, types, rows, 0);
+        } else if ("foreign_key_list".equals(pName)) {
+            List<String> cols = java.util.Arrays.asList("id", "seq", "table", "from", "to", "on_update", "on_delete", "match");
+            List<String> types = java.util.Arrays.asList("INT", "INT", "TEXT", "TEXT", "TEXT", "TEXT", "TEXT", "TEXT");
+            List<Map<String, Object>> rows = new ArrayList<>();
+
+            if (arg != null && !arg.trim().isEmpty() && activeSchemaJson != null) {
+                String tableName = arg.trim().replace("'", "").replace("\"", "").replace("`", "");
+                if (activeSchemaJson.has(tableName)) {
+                    JSONObject ts = activeSchemaJson.getJSONObject(tableName);
+                    JSONArray fks = ts.optJSONArray("foreign_keys");
+                    if (fks != null) {
+                        for (int i = 0; i < fks.length(); i++) {
+                            JSONObject fkObj = fks.getJSONObject(i);
+                            Map<String, Object> r = new LinkedHashMap<>();
+                            r.put("id", i);
+                            r.put("seq", 0);
+                            r.put("table", fkObj.optString("ref_table", fkObj.optString("referenced_table", "")));
+                            r.put("from", fkObj.optString("column", ""));
+                            r.put("to", fkObj.optString("ref_column", fkObj.optString("referenced_column", "")));
+                            r.put("on_update", fkObj.optString("on_update", "NO ACTION"));
+                            r.put("on_delete", fkObj.optString("on_delete", "NO ACTION"));
+                            r.put("match", "NONE");
+                            rows.add(r);
+                        }
+                    }
+                }
+            }
+            return QueryResult.createSelectSuccess(cols, types, rows, 0);
+        } else if ("foreign_keys".equals(pName)) {
+            if (arg != null && !arg.trim().isEmpty()) {
+                String valUpper = arg.toUpperCase().trim();
+                this.foreignKeyChecks = "ON".equals(valUpper) || "1".equals(valUpper) || "TRUE".equals(valUpper);
+                return QueryResult.createSuccess("PRAGMA foreign_keys set to " + (foreignKeyChecks ? "ON" : "OFF"), 0, 0);
+            } else {
+                List<String> cols = Collections.singletonList("foreign_keys");
+                List<String> types = Collections.singletonList("INT");
+                List<Map<String, Object>> rows = new ArrayList<>();
+                Map<String, Object> r = new LinkedHashMap<>();
+                r.put("foreign_keys", foreignKeyChecks ? 1 : 0);
+                rows.add(r);
+                return QueryResult.createSelectSuccess(cols, types, rows, 0);
+            }
+        } else if ("user_version".equals(pName)) {
+            List<String> cols = Collections.singletonList("user_version");
+            List<String> types = Collections.singletonList("INT");
+            List<Map<String, Object>> rows = new ArrayList<>();
+            Map<String, Object> r = new LinkedHashMap<>();
+            r.put("user_version", 1);
+            rows.add(r);
+            return QueryResult.createSelectSuccess(cols, types, rows, 0);
+        } else {
+            return QueryResult.createSuccess("PRAGMA executed successfully", 0, 0);
+        }
     }
 
     private int indexOfIgnoreCase(String src, String search) {

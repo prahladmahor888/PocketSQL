@@ -2678,9 +2678,20 @@ public class HomeFragment extends Fragment {
         joins.add(new TemplateItem("Inner Join (Matching rows)", "SELECT <col1>, <col2> FROM <table1> INNER JOIN <table2> ON <table1>.<id> = <table2>.<fk_id>;"));
         joins.add(new TemplateItem("Left Join (All left rows)", "SELECT <col1>, <col2> FROM <table1> LEFT JOIN <table2> ON <table1>.<id> = <table2>.<fk_id>;"));
         joins.add(new TemplateItem("Group By & Aggregates", "SELECT COUNT(*), SUM(<col>), AVG(<col>) FROM <table> GROUP BY <col>;"));
+        joins.add(new TemplateItem("Group By with HAVING Filter", "SELECT <category_col>, COUNT(*) FROM <table> GROUP BY <category_col> HAVING COUNT(*) > 1;"));
+        joins.add(new TemplateItem("Group By WITH ROLLUP Summary", "SELECT <category_col>, SUM(<amount_col>) FROM <table> GROUP BY <category_col> WITH ROLLUP;"));
+        joins.add(new TemplateItem("Monthly Sales Summary (Group By Alias & Order By Functions)", "SELECT CONCAT(MONTHNAME(order_date), ' ', YEAR(order_date)) AS sales_month, COUNT(DISTINCT order_id) AS total_orders, SUM(quantity * unit_price) AS total_revenue FROM orders INNER JOIN order_items ON orders.order_id = order_items.order_id GROUP BY YEAR(order_date), MONTH(order_date), sales_month ORDER BY YEAR(order_date), MONTH(order_date);"));
         list.add(new TemplateCategory("JOINS & AGGREGATES", joins));
 
-        // 3. ALTER TABLE Operations
+        // 3. CTE & Window Functions
+        List<TemplateItem> cteWindow = new ArrayList<>();
+        cteWindow.add(new TemplateItem("CTE (Common Table Expression)", "WITH RankedProducts AS (\n    SELECT p.category, p.product_id, p.product_name, SUM(oi.quantity * oi.unit_price) AS total_revenue,\n           DENSE_RANK() OVER (PARTITION BY p.category ORDER BY SUM(oi.quantity * oi.unit_price) DESC) AS `rank_in_category` \n    FROM products p INNER JOIN order_items oi ON p.product_id = oi.product_id\n    GROUP BY p.category, p.product_id, p.product_name\n)\nSELECT category, `rank_in_category` AS `rank`, product_id, product_name, total_revenue FROM RankedProducts WHERE `rank_in_category` <= 2 ORDER BY category, `rank_in_category`;"));
+        cteWindow.add(new TemplateItem("DENSE_RANK() Window Function", "SELECT employee_id, department_id, salary, DENSE_RANK() OVER (PARTITION BY department_id ORDER BY salary DESC) AS `rank` FROM employees;"));
+        cteWindow.add(new TemplateItem("ROW_NUMBER() Window Function", "SELECT id, name, ROW_NUMBER() OVER (ORDER BY created_at DESC) AS row_num FROM users;"));
+        cteWindow.add(new TemplateItem("RANK() Window Function", "SELECT student_id, score, RANK() OVER (ORDER BY score DESC) AS rank_pos FROM exam_results;"));
+        list.add(new TemplateCategory("CTE & WINDOW FUNCTIONS", cteWindow));
+
+        // 4. ALTER TABLE Operations
         List<TemplateItem> alter = new ArrayList<>();
         alter.add(new TemplateItem("Add New Column", "ALTER TABLE <table> ADD COLUMN <col> <type>;"));
         alter.add(new TemplateItem("Modify Column Type", "ALTER TABLE <table> MODIFY COLUMN <col> <new_type>;"));
@@ -2694,7 +2705,7 @@ public class HomeFragment extends Fragment {
         alter.add(new TemplateItem("Drop ON UPDATE Constraint", "ALTER TABLE <table> ALTER COLUMN <col> DROP ON UPDATE;"));
         list.add(new TemplateCategory("ALTER TABLE OPERATIONS", alter));
 
-        // 4. TRANSACTION CONTROL
+        // 5. TRANSACTION CONTROL
         List<TemplateItem> tx = new ArrayList<>();
         tx.add(new TemplateItem("Start Transaction", "START TRANSACTION;"));
         tx.add(new TemplateItem("Commit Transaction", "COMMIT;"));
@@ -2703,18 +2714,21 @@ public class HomeFragment extends Fragment {
         tx.add(new TemplateItem("Rollback to Savepoint", "ROLLBACK TO <savepoint_name>;"));
         list.add(new TemplateCategory("TRANSACTION CONTROL", tx));
 
-        // 5. SQL Functions
+        // 6. SQL Functions
         List<TemplateItem> funcs = new ArrayList<>();
         funcs.add(new TemplateItem("Concat Strings", "SELECT CONCAT(<col1>, ' ', <col2>) AS full_val FROM <table>;"));
+        funcs.add(new TemplateItem("Month Name, Year & Month", "SELECT MONTHNAME(order_date), YEAR(order_date), MONTH(order_date) FROM orders;"));
+        funcs.add(new TemplateItem("Date Formatting (DATE_FORMAT)", "SELECT DATE_FORMAT(order_date, '%Y-%m') AS sales_month FROM orders;"));
         funcs.add(new TemplateItem("Upper/Lower Case & Length", "SELECT UPPER(<col>), LOWER(<col>), LENGTH(<col>) FROM <table>;"));
         funcs.add(new TemplateItem("Date & Time (Now, Curdate)", "SELECT NOW(), CURDATE(), CURTIME(), DATE_ADD(NOW(), INTERVAL 7 DAY);"));
         funcs.add(new TemplateItem("Conditionals (If, Ifnull)", "SELECT IF(<col> > <val>, 'Yes', 'No'), IFNULL(<col>, 'Default'), COALESCE(<col1>, <col2>);"));
         funcs.add(new TemplateItem("Case Expression", "SELECT CASE WHEN <col> = '<v1>' THEN 'A' WHEN <col> = '<v2>' THEN 'B' ELSE 'C' END FROM <table>;"));
+        funcs.add(new TemplateItem("Backtick Identifier Escaping", "SELECT `rank_in_category` AS `rank` FROM `products`;"));
         funcs.add(new TemplateItem("Create JSON Object", "SELECT JSON_OBJECT('id', id, 'name', name) FROM <table>;"));
         funcs.add(new TemplateItem("Extract JSON Key", "SELECT JSON_EXTRACT(json_col, '$.key') FROM <table>;"));
         list.add(new TemplateCategory("SQL FUNCTIONS", funcs));
 
-        // 6. Database & User Admin
+        // 7. Database & User Admin
         List<TemplateItem> admin = new ArrayList<>();
         admin.add(new TemplateItem("Create Table", "CREATE TABLE <table> (id INT, name TEXT, value DOUBLE);"));
         admin.add(new TemplateItem("Create Table with Unsigned", "CREATE TABLE <table> (id INT UNSIGNED PRIMARY KEY, name VARCHAR(50));"));
@@ -2729,13 +2743,14 @@ public class HomeFragment extends Fragment {
         admin.add(new TemplateItem("Interactive Help Index", "HELP;"));
         admin.add(new TemplateItem("Help for Keyword", "HELP <keyword>;"));
         admin.add(new TemplateItem("Drop Table", "DROP TABLE <table>;"));
+        admin.add(new TemplateItem("Drop Table IF EXISTS", "DROP TABLE IF EXISTS <table>;"));
         admin.add(new TemplateItem("Drop Database", "DROP DATABASE <db_name>;"));
         admin.add(new TemplateItem("Create User Credentials", "CREATE USER '<user>'@'localhost' IDENTIFIED BY '<password>';"));
         admin.add(new TemplateItem("Grant User Privileges", "GRANT SELECT, INSERT, UPDATE, DELETE ON <db>.* TO '<user>'@'localhost';"));
         admin.add(new TemplateItem("Flush Admin Privileges", "FLUSH PRIVILEGES;"));
         list.add(new TemplateCategory("DATABASE & USER ADMIN", admin));
 
-        // 7. EXPORT & IMPORT
+        // 8. EXPORT & IMPORT
         List<TemplateItem> backup = new ArrayList<>();
         backup.add(new TemplateItem("Export Database (SQL format)", "EXPORT DATABASE <db_name> TO '/sdcard/Download/<db_name>.sql';"));
         backup.add(new TemplateItem("Export Database (SQLite .db format)", "EXPORT DATABASE <db_name> TO '/sdcard/Download/<db_name>.db';"));

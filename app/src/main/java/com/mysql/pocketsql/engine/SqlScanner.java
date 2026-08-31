@@ -16,13 +16,13 @@ public class SqlScanner {
             if (raw == null) continue;
             // Clean function parentheses e.g. "CONCAT()" -> "CONCAT"
             String cleaned = raw.replaceAll("\\(\\)", "").trim();
-            // Split multi-word keywords e.g. "NOT NULL" -> "NOT", "NULL"
             for (String part : cleaned.split("\\s+")) {
                 if (!part.isEmpty()) {
                     KEYWORDS.add(part.toUpperCase());
                 }
             }
         }
+        KEYWORDS.add("PRAGMA");
     }
 
     public SqlScanner(String input) {
@@ -170,6 +170,34 @@ public class SqlScanner {
                     throw new SqlSyntaxException("Unterminated string literal starting at position " + tokenPos, tokenPos);
                 }
                 tokens.add(new SqlToken(SqlToken.Type.STRING, sb.toString(), tokenPos));
+                continue;
+            }
+
+            // 4b. Backtick Quoted Identifiers (`identifier`)
+            if (c == '`') {
+                pos++; // skip opening backtick
+                StringBuilder sb = new StringBuilder();
+                boolean closed = false;
+                while (pos < length) {
+                    char next = input.charAt(pos);
+                    if (next == '`') {
+                        if (pos + 1 < length && input.charAt(pos + 1) == '`') {
+                            // Escaped backtick ``
+                            sb.append('`');
+                            pos += 2;
+                            continue;
+                        }
+                        closed = true;
+                        pos++; // skip closing backtick
+                        break;
+                    }
+                    sb.append(next);
+                    pos++;
+                }
+                if (!closed) {
+                    throw new SqlSyntaxException("Unterminated backtick identifier starting at position " + tokenPos, tokenPos);
+                }
+                tokens.add(new SqlToken(SqlToken.Type.IDENTIFIER, sb.toString(), tokenPos));
                 continue;
             }
 
