@@ -348,10 +348,14 @@ public class HomeFragment extends Fragment {
         }
         etCommandInput.setInputType(inputType);
         if (!isPassword) {
-            etCommandInput.setSingleLine(false);
+            // Use setMaxLines instead of setSingleLine(false).
+            // setSingleLine(false) tells keyboards (Gboard etc.) the field is multiline,
+            // which makes them hide the IME action button and show a plain newline Enter key.
+            // setMaxLines keeps visual text-wrapping WITHOUT triggering multiline keyboard mode.
+            etCommandInput.setMaxLines(Integer.MAX_VALUE);
             etCommandInput.setHorizontallyScrolling(false);
-            // setImeOptions MUST come after setSingleLine(false) —
-            // setSingleLine() internally resets imeOptions to IME_ACTION_UNSPECIFIED.
+            // setImeOptions MUST come after any method that internally calls setInputType —
+            // those methods reset imeOptions to IME_ACTION_UNSPECIFIED.
             etCommandInput.setImeOptions(android.view.inputmethod.EditorInfo.IME_ACTION_SEND);
         }
         if (getContext() != null && settings != null) {
