@@ -71,7 +71,7 @@
                     android:cursorVisible="true"
                     android:letterSpacing="0.0"
                     android:imeOptions="actionSend"
-                    android:inputType="textMultiLine|textNoSuggestions"
+                    android:inputType="textNoSuggestions"
                     android:scrollHorizontally="false"
                     android:paddingHorizontal="0dp"
                     android:paddingTop="0dp"

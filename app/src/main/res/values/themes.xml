@@ -1,8 +1,9 @@
 <resources xmlns:tools="http://schemas.android.com/tools">
     <!-- Base application theme. -->
     <style name="Base.Theme.PocketSQL" parent="Theme.Material3.DayNight.NoActionBar">
-        <!-- Customize your light theme here. -->
-        <!-- <item name="colorPrimary">@color/my_light_primary</item> -->
+        <!-- Black window background: eliminates the white/grey blank screen on cold start -->
+        <item name="android:windowBackground">#000000</item>
+        <item name="android:windowIsTranslucent">false</item>
     </style>
 
     <style name="Theme.PocketSQL" parent="Base.Theme.PocketSQL" />
