@@ -108,7 +108,7 @@ public class SqlParser {
 
     void expectKeyword(String keyword, String errorMsg) throws SqlSyntaxException {
         SqlToken t = peek();
-        if (t.type != SqlToken.Type.KEYWORD || !keyword.equalsIgnoreCase(t.value)) {
+        if ((t.type != SqlToken.Type.KEYWORD && t.type != SqlToken.Type.IDENTIFIER) || !keyword.equalsIgnoreCase(t.value)) {
             throw new SqlSyntaxException(errorMsg + ", found '" + t.value + "'", t.position);
         }
         consume();
@@ -1026,19 +1026,57 @@ public class SqlParser {
         
         if (matchKeyword("DATABASES")) {
             return new Command.ShowDatabases();
-        } else if (matchKeyword("TABLES")) {
-            String databaseName = null;
-            if (matchKeyword("FROM") || matchKeyword("IN")) {
-                SqlToken dbTok = peek();
-                if (dbTok.type == SqlToken.Type.IDENTIFIER || dbTok.type == SqlToken.Type.KEYWORD) {
-                    databaseName = dbTok.value;
-                    consume();
-                } else {
-                    throw new SqlSyntaxException("Expected database name after SHOW TABLES FROM/IN", dbTok.position);
-                }
+        } else if (matchKeyword("TABLES") || matchKeyword("TABLE") || matchName("TABLE")) {
+            boolean isStatus = false;
+            if (matchKeyword("STATUS") || matchName("STATUS")) {
+                isStatus = true;
             }
-            Clause.Where where = parseOptionalWhere();
-            return new Command.ShowTables(full, databaseName, where);
+            if (isStatus) {
+                String databaseName = null;
+                if (matchKeyword("FROM") || matchKeyword("IN")) {
+                    SqlToken dbTok = peek();
+                    if (dbTok.type == SqlToken.Type.IDENTIFIER || dbTok.type == SqlToken.Type.KEYWORD) {
+                        databaseName = dbTok.value;
+                        consume();
+                    } else {
+                        throw new SqlSyntaxException("Expected database name after SHOW TABLE STATUS FROM/IN", dbTok.position);
+                    }
+                }
+                String likePattern = null;
+                if (matchKeyword("LIKE") || matchName("LIKE")) {
+                    SqlToken patTok = peek();
+                    if (patTok.type == SqlToken.Type.STRING || patTok.type == SqlToken.Type.IDENTIFIER) {
+                        likePattern = patTok.value;
+                        consume();
+                    } else {
+                        throw new SqlSyntaxException("Expected pattern string after LIKE", patTok.position);
+                    }
+                }
+                if (databaseName == null && (matchKeyword("FROM") || matchKeyword("IN"))) {
+                    SqlToken dbTok = peek();
+                    if (dbTok.type == SqlToken.Type.IDENTIFIER || dbTok.type == SqlToken.Type.KEYWORD) {
+                        databaseName = dbTok.value;
+                        consume();
+                    } else {
+                        throw new SqlSyntaxException("Expected database name after SHOW TABLE STATUS FROM/IN", dbTok.position);
+                    }
+                }
+                Clause.Where where = parseOptionalWhere();
+                return new Command.ShowTableStatus(databaseName, likePattern, where);
+            } else {
+                String databaseName = null;
+                if (matchKeyword("FROM") || matchKeyword("IN")) {
+                    SqlToken dbTok = peek();
+                    if (dbTok.type == SqlToken.Type.IDENTIFIER || dbTok.type == SqlToken.Type.KEYWORD) {
+                        databaseName = dbTok.value;
+                        consume();
+                    } else {
+                        throw new SqlSyntaxException("Expected database name after SHOW TABLES FROM/IN", dbTok.position);
+                    }
+                }
+                Clause.Where where = parseOptionalWhere();
+                return new Command.ShowTables(full, databaseName, where);
+            }
         } else if (matchName("COLUMNS") || matchName("FIELDS")) {
             if (!matchKeyword("FROM") && !matchKeyword("IN")) {
                 throw new SqlSyntaxException("Expected 'FROM' or 'IN' after 'SHOW COLUMNS'", peek().position);
@@ -1106,10 +1144,49 @@ public class SqlParser {
 
     private Command parseInsert() throws SqlSyntaxException {
         consume(); // INSERT
-        expectKeyword("INTO", "Expected 'INTO' after 'INSERT'");
-        String tableName = parseTableName("Expected table name");
+        boolean ignore = false;
+        while (pos < tokens.size()) {
+            if (matchName("IGNORE") || matchKeyword("IGNORE")) {
+                ignore = true;
+            } else if (matchName("LOW_PRIORITY") || matchKeyword("LOW_PRIORITY") ||
+                       matchName("HIGH_PRIORITY") || matchKeyword("HIGH_PRIORITY") ||
+                       matchName("DELAYED") || matchKeyword("DELAYED")) {
+                // consumed modifier
+            } else {
+                break;
+            }
+        }
+        
+        if (matchKeyword("INTO") || matchName("INTO")) {
+            // consumed INTO
+        }
+        
+        if (matchName("IGNORE") || matchKeyword("IGNORE")) {
+            ignore = true;
+        }
+
+        String tableName = parseTableName("Expected table name after INSERT");
 
         List<String> columnNames = null;
+        List<List<Object>> valuesList = null;
+
+        if (matchKeyword("SET") || matchName("SET")) {
+            columnNames = new ArrayList<>();
+            List<Object> singleRowValues = new ArrayList<>();
+            do {
+                expect(SqlToken.Type.IDENTIFIER, "Expected column name after SET in INSERT");
+                columnNames.add(tokens.get(pos - 1).value);
+                expectSymbol("=", "Expected '=' after column name in INSERT ... SET");
+                singleRowValues.add(parseInsertValue());
+            } while (matchSymbol(","));
+            valuesList = new ArrayList<>();
+            valuesList.add(singleRowValues);
+            
+            Command.Insert cmd = new Command.Insert(tableName, columnNames, valuesList);
+            cmd.ignore = ignore;
+            return cmd;
+        }
+
         if (matchSymbol("(")) {
             columnNames = new ArrayList<>();
             do {
@@ -1122,14 +1199,33 @@ public class SqlParser {
         if (peek().type == SqlToken.Type.KEYWORD && "SELECT".equalsIgnoreCase(peek().value)) {
             Command selectCmd = parseSelect();
             if (selectCmd instanceof Command.Select) {
-                return new Command.Insert(tableName, columnNames, (Command.Select) selectCmd);
+                Command.Insert cmd = new Command.Insert(tableName, columnNames, (Command.Select) selectCmd);
+                cmd.ignore = ignore;
+                return cmd;
             }
             throw new SqlSyntaxException("Expected SELECT query after INSERT INTO " + tableName, peek().position);
         }
 
-        expectKeyword("VALUES", "Expected 'VALUES' or 'SELECT' in insert command");
+        if (matchKeyword("SET") || matchName("SET")) {
+            columnNames = new ArrayList<>();
+            List<Object> singleRowValues = new ArrayList<>();
+            do {
+                expect(SqlToken.Type.IDENTIFIER, "Expected column name after SET in INSERT");
+                columnNames.add(tokens.get(pos - 1).value);
+                expectSymbol("=", "Expected '=' after column name in INSERT ... SET");
+                singleRowValues.add(parseInsertValue());
+            } while (matchSymbol(","));
+            valuesList = new ArrayList<>();
+            valuesList.add(singleRowValues);
+            
+            Command.Insert cmd = new Command.Insert(tableName, columnNames, valuesList);
+            cmd.ignore = ignore;
+            return cmd;
+        }
 
-        List<List<Object>> valuesList = new ArrayList<>();
+        expectKeyword("VALUES", "Expected 'VALUES', 'SET' or 'SELECT' in insert command");
+
+        valuesList = new ArrayList<>();
         do {
             expectSymbol("(", "Expected '(' to open insert row values list");
             List<Object> values = new ArrayList<>();
@@ -1163,6 +1259,7 @@ public class SqlParser {
 
         Command.Insert cmd = new Command.Insert(tableName, columnNames, valuesList);
         cmd.updateAssignments = updateAssignments;
+        cmd.ignore = ignore;
         return cmd;
     }
 
@@ -1513,7 +1610,12 @@ projection.add(selectItem);
             do {
                 groupCols.add(parseGroupByExpression());
             } while (matchSymbol(","));
-            groupBy = new Clause.GroupBy(groupCols);
+            boolean withRollup = false;
+            if (matchKeyword("WITH")) {
+                expectKeyword("ROLLUP", "Expected 'ROLLUP' after 'WITH'");
+                withRollup = true;
+            }
+            groupBy = new Clause.GroupBy(groupCols, withRollup);
         }
 
         // Parse HAVING
@@ -1679,7 +1781,8 @@ projection.add(selectItem);
                     "HAVING".equalsIgnoreCase(t.value) ||
                     "ORDER".equalsIgnoreCase(t.value) ||
                     "LIMIT".equalsIgnoreCase(t.value) ||
-                    "UNION".equalsIgnoreCase(t.value)
+                    "UNION".equalsIgnoreCase(t.value) ||
+                    "WITH".equalsIgnoreCase(t.value)
                 )) {
                     break;
                 }
@@ -1789,7 +1892,6 @@ projection.add(selectItem);
             }
             consume();
 
-            // Track parentheses depth for nested functions
             if (t.type == SqlToken.Type.SYMBOL) {
                 if ("(".equals(t.value)) {
                     parenDepth++;
@@ -1852,7 +1954,26 @@ projection.add(selectItem);
 
         Clause.Where where = parseOptionalWhere();
 
-        return new Command.Update(tableName, updates, where);
+        String orderByColumn = null;
+        boolean orderAsc = true;
+        if (matchKeyword("ORDER")) {
+            expectKeyword("BY", "Expected 'BY' after 'ORDER'");
+            expect(SqlToken.Type.IDENTIFIER, "Expected column name in ORDER BY");
+            orderByColumn = tokens.get(pos - 1).value;
+            if (matchKeyword("DESC")) {
+                orderAsc = false;
+            } else {
+                matchKeyword("ASC");
+            }
+        }
+
+        Integer limit = null;
+        if (matchKeyword("LIMIT")) {
+            expect(SqlToken.Type.NUMBER, "Expected limit count after 'LIMIT'");
+            limit = Integer.parseInt(tokens.get(pos - 1).value);
+        }
+
+        return new Command.Update(tableName, updates, where, orderByColumn, orderAsc, limit);
     }
 
     private Object parseUpdateValue() throws SqlSyntaxException {
@@ -1951,7 +2072,26 @@ projection.add(selectItem);
 
         Clause.Where where = parseOptionalWhere();
 
-        return new Command.Delete(tableName, where);
+        String orderByColumn = null;
+        boolean orderAsc = true;
+        if (matchKeyword("ORDER")) {
+            expectKeyword("BY", "Expected 'BY' after 'ORDER'");
+            expect(SqlToken.Type.IDENTIFIER, "Expected column name in ORDER BY");
+            orderByColumn = tokens.get(pos - 1).value;
+            if (matchKeyword("DESC")) {
+                orderAsc = false;
+            } else {
+                matchKeyword("ASC");
+            }
+        }
+
+        Integer limit = null;
+        if (matchKeyword("LIMIT")) {
+            expect(SqlToken.Type.NUMBER, "Expected limit count after 'LIMIT'");
+            limit = Integer.parseInt(tokens.get(pos - 1).value);
+        }
+
+        return new Command.Delete(tableName, where, orderByColumn, orderAsc, limit);
     }
 
     private Clause.Where parseOptionalWhere() throws SqlSyntaxException {
@@ -1987,6 +2127,9 @@ projection.add(selectItem);
 
     private Clause.Where parseWhereUnary() throws SqlSyntaxException {
         if (matchKeyword("NOT")) {
+            if (matchKeyword("EXISTS")) {
+                return parseExistsSubquery("NOT EXISTS");
+            }
             Clause.Where sub = parseWhereUnary();
             List<Clause.Where> subs = new ArrayList<>();
             subs.add(sub);
@@ -1996,12 +2139,45 @@ projection.add(selectItem);
     }
 
     private Clause.Where parseWherePrimary() throws SqlSyntaxException {
+        if (matchKeyword("EXISTS")) {
+            return parseExistsSubquery("EXISTS");
+        }
         if (matchSymbol("(")) {
             Clause.Where expr = parseWhereExpression();
             expectSymbol(")", "Expected ')' to close parenthesized WHERE expression");
             return expr;
         }
         return parseSimpleComparison();
+    }
+
+    private Clause.Where parseExistsSubquery(String operator) throws SqlSyntaxException {
+        expectSymbol("(", "Expected '(' after '" + operator + "'");
+        expectKeyword("SELECT", "Expected 'SELECT' in EXISTS subquery");
+
+        int startPos = tokens.get(pos - 1).position;
+        int depth = 1;
+        int endPos = startPos;
+        while (depth > 0 && peek().type != SqlToken.Type.EOF) {
+            SqlToken tok = consume();
+            if (tok.type == SqlToken.Type.SYMBOL && "(".equals(tok.value)) {
+                depth++;
+            } else if (tok.type == SqlToken.Type.SYMBOL && ")".equals(tok.value)) {
+                depth--;
+                if (depth == 0) {
+                    endPos = tok.position;
+                    break;
+                }
+            }
+        }
+
+        String subSql;
+        if (sql != null && startPos >= 0 && endPos > startPos && endPos <= sql.length()) {
+            subSql = sql.substring(startPos, endPos).trim();
+        } else {
+            subSql = "SELECT 1";
+        }
+
+        return new Clause.Where(null, operator, subSql, false);
     }
 
     private Clause.Where parseSimpleComparison() throws SqlSyntaxException {
@@ -2589,8 +2765,14 @@ projection.add(selectItem);
     }
 
     private Command parseAddCheck(String tableName) throws SqlSyntaxException {
+        return parseAddCheck(tableName, null);
+    }
+
+    private Command parseAddCheck(String tableName, String constraintName) throws SqlSyntaxException {
         Map<String, Object> check = parseCheckConstraintBody();
-        return new Command.AlterTable(tableName, "ADD_CHECK", check);
+        Command.AlterTable cmd = new Command.AlterTable(tableName, "ADD_CHECK", check);
+        cmd.constraintName = constraintName;
+        return cmd;
     }
 
     private Command parseAlter() throws SqlSyntaxException {
@@ -2712,7 +2894,7 @@ projection.add(selectItem);
                                     expectKeyword("KEY", "Expected 'KEY' after 'FOREIGN'");
                                     operations.add(parseAddForeignKey(tableName));
                                 } else if ("CHECK".equals(subOp)) {
-                                    operations.add(parseAddCheck(tableName));
+                                    operations.add(parseAddCheck(tableName, constraintName));
                                 } else {
                                     throw new SqlSyntaxException("Expected UNIQUE, PRIMARY KEY, FOREIGN KEY, or CHECK after CONSTRAINT name", afterConstraint.position);
                                 }
@@ -2812,6 +2994,11 @@ projection.add(selectItem);
                         expect(SqlToken.Type.IDENTIFIER, "Expected check constraint name to drop");
                         String chkName = tokens.get(pos - 1).value;
                         operations.add(new Command.AlterTable(tableName, "DROP_CHECK", chkName));
+                    } else if ("CONSTRAINT".equals(nextVal)) {
+                        consume(); // CONSTRAINT
+                        expect(SqlToken.Type.IDENTIFIER, "Expected constraint name to drop");
+                        String constraintName = tokens.get(pos - 1).value;
+                        operations.add(new Command.AlterTable(tableName, "DROP_CONSTRAINT", constraintName));
                     } else {
                         expect(SqlToken.Type.IDENTIFIER, "Expected column name to drop");
                         String col = tokens.get(pos - 1).value;

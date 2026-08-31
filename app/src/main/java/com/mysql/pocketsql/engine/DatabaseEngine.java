@@ -275,7 +275,9 @@ public class DatabaseEngine {
                 duration
             );
         } catch (SqlSyntaxException e) {
-            return QueryResult.createError("ERROR 1064 (42000): You have an error in your SQL syntax; check the manual that corresponds to your PocketSQL server version (1.0.1) for the right syntax near '" + e.getMessage() + "'");
+            String ver = "1.0.1";
+            try { ver = com.mysql.pocketsql.BuildConfig.VERSION_NAME; } catch (Throwable ignored) {}
+            return QueryResult.createError("ERROR 1064 (42000): You have an error in your SQL syntax; check the manual that corresponds to your PocketSQL server version (" + ver + ") for the right syntax near '" + e.getMessage() + "'");
         } catch (Throwable e) {
             com.mysql.pocketsql.engine.SqlLog.printStackTrace(e);
             String msg = e.getMessage() != null ? e.getMessage() : "Unknown error";
@@ -425,6 +427,10 @@ public class DatabaseEngine {
     }
 
     public QueryResult insertIntoSelect(String tableName, List<String> columnNames, Command.Select selectQuery) throws Exception {
+        return insertIntoSelect(tableName, columnNames, selectQuery, false);
+    }
+
+    public QueryResult insertIntoSelect(String tableName, List<String> columnNames, Command.Select selectQuery, boolean ignore) throws Exception {
         QueryResult selectRes = selectFrom(selectQuery);
         if (!selectRes.success) {
             return selectRes;
@@ -444,7 +450,7 @@ public class DatabaseEngine {
             }
             valuesList.add(rowVals);
         }
-        return insertInto(tableName, targetCols, valuesList, null);
+        return insertInto(tableName, targetCols, valuesList, null, ignore);
     }
 
     public QueryResult createTableAsSelect(String tableName, Command.Select selectQuery, boolean ifNotExists) throws Exception {
@@ -1854,11 +1860,45 @@ public class DatabaseEngine {
     }
 
     private long getNextAutoIncrementValue(TableData td, String colName) {
-        Long cachedMax = td.autoIncrementCounters.get(colName);
-        if (cachedMax != null) {
-            return cachedMax + 1;
+        long schemaNext = 1;
+        if (activeSchemaJson != null && activeSchemaJson.has(td.tableName)) {
+            JSONObject tblSchema = activeSchemaJson.optJSONObject(td.tableName);
+            if (tblSchema != null) {
+                schemaNext = tblSchema.optLong("auto_increment", tblSchema.optLong("AUTO_INCREMENT", 1L));
+            }
         }
-        return 1;
+        Long cachedMax = td.autoIncrementCounters.get(colName);
+        long maxFromRows = 0;
+        if (cachedMax != null) {
+            maxFromRows = cachedMax;
+        } else {
+            for (Map<String, Object> r : td.rows) {
+                Object v = r.get(colName);
+                if (v != null) {
+                    try {
+                        long lv = Long.parseLong(String.valueOf(v));
+                        if (lv > maxFromRows) {
+                            maxFromRows = lv;
+                        }
+                    } catch (NumberFormatException ignored) {}
+                }
+            }
+        }
+        
+        long nextVal = Math.max(schemaNext, maxFromRows + 1);
+        td.autoIncrementCounters.put(colName, nextVal);
+        
+        if (activeSchemaJson != null && activeSchemaJson.has(td.tableName)) {
+            JSONObject tblSchema = activeSchemaJson.optJSONObject(td.tableName);
+            if (tblSchema != null) {
+                try {
+                    tblSchema.put("auto_increment", nextVal + 1);
+                    storageEngine.writeSchema(activeDatabaseName, activeSchemaJson);
+                } catch (Exception ignored) {}
+            }
+        }
+        
+        return nextVal;
     }
 
     boolean isColumnVisible(String tableName, String colName) {
@@ -1954,11 +1994,31 @@ public class DatabaseEngine {
         return v1.toString().trim().equalsIgnoreCase(v2.toString().trim());
     }
 
+    private int compareValuesForSort(Object v1, Object v2) {
+        if (v1 == null && v2 == null) return 0;
+        if (v1 == null) return -1;
+        if (v2 == null) return 1;
+        if (v1 instanceof Number && v2 instanceof Number) {
+            return Double.compare(((Number) v1).doubleValue(), ((Number) v2).doubleValue());
+        }
+        try {
+            double d1 = Double.parseDouble(v1.toString());
+            double d2 = Double.parseDouble(v2.toString());
+            return Double.compare(d1, d2);
+        } catch (Exception e) {
+            return SqlCollation.compare(v1.toString(), v2.toString(), "utf8mb4_general_ci");
+        }
+    }
+
     public QueryResult insertInto(String tableName, List<String> colNames, List<List<Object>> valuesList) throws Exception {
-        return insertInto(tableName, colNames, valuesList, null);
+        return insertInto(tableName, colNames, valuesList, null, false);
     }
 
     public QueryResult insertInto(String tableName, List<String> colNames, List<List<Object>> valuesList, Map<String, String> updateAssignments) throws Exception {
+        return insertInto(tableName, colNames, valuesList, updateAssignments, false);
+    }
+
+    public QueryResult insertInto(String tableName, List<String> colNames, List<List<Object>> valuesList, Map<String, String> updateAssignments, boolean ignore) throws Exception {
         tableName = resolveTableName(tableName);
         verifyPrivilege("INSERT", activeDatabaseName, tableName);
         TableData td = getOrLoadTable(tableName);
@@ -1967,32 +2027,82 @@ public class DatabaseEngine {
         for (List<Object> values : valuesList) {
             Map<String, Object> newRow = new HashMap<>();
 
-            if (colNames == null) {
-                // Positional insert
-                if (values.isEmpty()) {
-                    // All default values
-                    for (int i = 0; i < td.columns.size(); i++) {
-                        String col = td.columns.get(i);
-                        Object val = getDefaultValue(tableName, col);
-                        if (val == null && isAutoIncrementColumn(tableName, col)) {
-                            val = getNextAutoIncrementValue(td, col);
+            try {
+                if (colNames == null) {
+                    // Positional insert
+                    if (values.isEmpty()) {
+                        // All default values
+                        for (int i = 0; i < td.columns.size(); i++) {
+                            String col = td.columns.get(i);
+                            Object val = getDefaultValue(tableName, col);
+                            if (val == null && isAutoIncrementColumn(tableName, col)) {
+                                val = getNextAutoIncrementValue(td, col);
+                            }
+                            Object finalVal = validateAndConvertType(col, val, td.types.get(i));
+                            newRow.put(col, finalVal);
                         }
-                        Object finalVal = validateAndConvertType(col, val, td.types.get(i));
-                        newRow.put(col, finalVal);
+                    } else {
+                        if (values.size() != td.columns.size()) {
+                            throw new Exception("Column count doesn't match value count. Table has " + td.columns.size() + " columns, but " + values.size() + " values were supplied.");
+                        }
+                        for (int i = 0; i < td.columns.size(); i++) {
+                            String col = td.columns.get(i);
+                            String type = td.types.get(i);
+                            Object val = values.get(i);
+                            if (val instanceof String && ((String) val).startsWith("\u0000EXPR\u0000")) {
+                                String exprStr = ((String) val).substring("\u0000EXPR\u0000".length());
+                                val = SqlFunctions.evaluate(exprStr, newRow, this);
+                            }
+                            if ("\u0000DEFAULT\u0000".equals(val)) {
+                                val = getDefaultValue(tableName, col);
+                            }
+                            if (val == null && isAutoIncrementColumn(tableName, col)) {
+                                val = getNextAutoIncrementValue(td, col);
+                            }
+                            Object finalVal = validateAndConvertType(col, val, type);
+                            newRow.put(col, finalVal);
+                        }
                     }
                 } else {
-                    if (values.size() != td.columns.size()) {
-                        throw new Exception("Column count doesn't match value count. Table has " + td.columns.size() + " columns, but " + values.size() + " values were supplied.");
+                    // Column-specific insert
+                    if (values.size() != colNames.size()) {
+                        throw new Exception("Column count doesn't match value count in insert list.");
                     }
-                    for (int i = 0; i < td.columns.size(); i++) {
-                        String col = td.columns.get(i);
-                        String type = td.types.get(i);
+                    
+                    // Map of name -> index
+                    Map<String, Object> insertMap = new HashMap<>();
+                    for (int i = 0; i < colNames.size(); i++) {
+                        String col = colNames.get(i);
+                        String actualColName = null;
+                        for (String c : td.columns) {
+                            if (c.equalsIgnoreCase(col)) {
+                                actualColName = c;
+                                break;
+                            }
+                        }
+                        if (actualColName == null) {
+                            throw new Exception("Error: Unknown column '" + col + "' in table '" + tableName + "'");
+                        }
                         Object val = values.get(i);
                         if (val instanceof String && ((String) val).startsWith("\u0000EXPR\u0000")) {
                             String exprStr = ((String) val).substring("\u0000EXPR\u0000".length());
-                            val = SqlFunctions.evaluate(exprStr, newRow, this);
+                            val = SqlFunctions.evaluate(exprStr, insertMap, this);
                         }
                         if ("\u0000DEFAULT\u0000".equals(val)) {
+                            val = getDefaultValue(tableName, actualColName);
+                        }
+                        insertMap.put(actualColName, val);
+                    }
+
+                    // Fill all schema columns
+                    for (int i = 0; i < td.columns.size(); i++) {
+                        String col = td.columns.get(i);
+                        String type = td.types.get(i);
+                        Object val;
+                        if (insertMap.containsKey(col)) {
+                            val = insertMap.get(col);
+                        } else {
+                            // Column was not supplied, use default value!
                             val = getDefaultValue(tableName, col);
                         }
                         if (val == null && isAutoIncrementColumn(tableName, col)) {
@@ -2002,83 +2112,43 @@ public class DatabaseEngine {
                         newRow.put(col, finalVal);
                     }
                 }
-            } else {
-                // Column-specific insert
-                if (values.size() != colNames.size()) {
-                    throw new Exception("Column count doesn't match value count in insert list.");
-                }
-                
-                // Map of name -> index
-                Map<String, Object> insertMap = new HashMap<>();
-                for (int i = 0; i < colNames.size(); i++) {
-                    String col = colNames.get(i);
-                    String actualColName = null;
-                    for (String c : td.columns) {
-                        if (c.equalsIgnoreCase(col)) {
-                            actualColName = c;
-                            break;
+
+                Map<String, Object> conflictingRow = findConflictingRow(tableName, newRow, td);
+                if (conflictingRow != null && updateAssignments != null && !updateAssignments.isEmpty()) {
+                    // Perform UPDATE in-place
+                    Map<String, Object> updatedRow = new HashMap<>(conflictingRow);
+                    for (Map.Entry<String, String> entry : updateAssignments.entrySet()) {
+                        String col = entry.getKey();
+                        String exprStr = entry.getValue();
+                        Object val = evaluateDuplicateKeyExpr(exprStr, conflictingRow, newRow);
+                        
+                        // Validate and convert type
+                        int colIdx = td.columns.indexOf(col);
+                        if (colIdx != -1) {
+                            val = validateAndConvertType(col, val, td.types.get(colIdx));
                         }
+                        updatedRow.put(col, val);
                     }
-                    if (actualColName == null) {
-                        throw new Exception("Error: Unknown column '" + col + "' in table '" + tableName + "'");
-                    }
-                    Object val = values.get(i);
-                    if (val instanceof String && ((String) val).startsWith("\u0000EXPR\u0000")) {
-                        String exprStr = ((String) val).substring("\u0000EXPR\u0000".length());
-                        val = SqlFunctions.evaluate(exprStr, insertMap, this);
-                    }
-                    if ("\u0000DEFAULT\u0000".equals(val)) {
-                        val = getDefaultValue(tableName, actualColName);
-                    }
-                    insertMap.put(actualColName, val);
-                }
-
-                // Fill all schema columns
-                for (int i = 0; i < td.columns.size(); i++) {
-                    String col = td.columns.get(i);
-                    String type = td.types.get(i);
-                    Object val;
-                    if (insertMap.containsKey(col)) {
-                        val = insertMap.get(col);
-                    } else {
-                        // Column was not supplied, use default value!
-                        val = getDefaultValue(tableName, col);
-                    }
-                    if (val == null && isAutoIncrementColumn(tableName, col)) {
-                        val = getNextAutoIncrementValue(td, col);
-                    }
-                    Object finalVal = validateAndConvertType(col, val, type);
-                    newRow.put(col, finalVal);
-                }
-            }
-
-            Map<String, Object> conflictingRow = findConflictingRow(tableName, newRow, td);
-            if (conflictingRow != null && updateAssignments != null && !updateAssignments.isEmpty()) {
-                // Perform UPDATE in-place
-                Map<String, Object> updatedRow = new HashMap<>(conflictingRow);
-                for (Map.Entry<String, String> entry : updateAssignments.entrySet()) {
-                    String col = entry.getKey();
-                    String exprStr = entry.getValue();
-                    Object val = evaluateDuplicateKeyExpr(exprStr, conflictingRow, newRow);
                     
-                    // Validate and convert type
-                    int colIdx = td.columns.indexOf(col);
-                    if (colIdx != -1) {
-                        val = validateAndConvertType(col, val, td.types.get(colIdx));
-                    }
-                    updatedRow.put(col, val);
+                    // Validate constraints
+                    validateRowConstraints(tableName, updatedRow, td, conflictingRow);
+                    
+                    // Update in-place
+                    conflictingRow.putAll(updatedRow);
+                    affected += 2;
+                } else if (conflictingRow != null && ignore) {
+                    // Skip duplicate row on IGNORE
+                    continue;
+                } else {
+                    validateRowConstraints(tableName, newRow, td, null);
+                    td.rows.add(newRow);
+                    affected++;
                 }
-                
-                // Validate constraints
-                validateRowConstraints(tableName, updatedRow, td, conflictingRow);
-                
-                // Update in-place
-                conflictingRow.putAll(updatedRow);
-                affected += 2;
-            } else {
-                validateRowConstraints(tableName, newRow, td, null);
-                td.rows.add(newRow);
-                affected++;
+            } catch (Exception ex) {
+                if (ignore) {
+                    continue;
+                }
+                throw ex;
             }
         }
 
@@ -2365,7 +2435,7 @@ public class DatabaseEngine {
     private boolean isAggregate(String expr) {
         if (expr == null) return false;
         if (expr.toUpperCase().contains("OVER")) return false;
-        java.util.regex.Pattern p = java.util.regex.Pattern.compile("(?i)\\b(COUNT|SUM|AVG|MIN|MAX)\\s*\\(");
+        java.util.regex.Pattern p = java.util.regex.Pattern.compile("(?i)\\b(COUNT|SUM|AVG|MIN|MAX|GROUP_CONCAT)\\s*\\(");
         return p.matcher(expr).find();
     }
 
@@ -2418,12 +2488,12 @@ public class DatabaseEngine {
     }
 
     /**
-     * Finds all top-level aggregate function matches (COUNT, SUM, AVG, MIN, MAX) in an expression,
+     * Finds all top-level aggregate function matches (COUNT, SUM, AVG, MIN, MAX, GROUP_CONCAT) in an expression,
      * respecting nested parentheses. Returns list of [start, end) index pairs.
      */
     private List<int[]> findAggregateMatches(String expr) {
         List<int[]> results = new ArrayList<>();
-        java.util.regex.Pattern funcStart = java.util.regex.Pattern.compile("(?i)\\b(COUNT|SUM|AVG|MIN|MAX)\\s*\\(");
+        java.util.regex.Pattern funcStart = java.util.regex.Pattern.compile("(?i)\\b(COUNT|SUM|AVG|MIN|MAX|GROUP_CONCAT)\\s*\\(");
         java.util.regex.Matcher m = funcStart.matcher(expr);
         while (m.find()) {
             int start = m.start();
@@ -2609,6 +2679,70 @@ public class DatabaseEngine {
             }
             if (numeric && maxNum != null) return maxNum;
             return maxStr;
+        }
+
+        if ("GROUP_CONCAT".equalsIgnoreCase(funcName)) {
+            String expr = colExpr;
+            String separator = ",";
+            int sepIdx = expr.toUpperCase().indexOf(" SEPARATOR ");
+            if (sepIdx != -1) {
+                String sepPart = expr.substring(sepIdx + 11).trim();
+                expr = expr.substring(0, sepIdx).trim();
+                if ((sepPart.startsWith("'") && sepPart.endsWith("'")) || (sepPart.startsWith("\"") && sepPart.endsWith("\""))) {
+                    sepPart = sepPart.substring(1, sepPart.length() - 1);
+                }
+                separator = sepPart;
+            }
+
+            String orderCol = null;
+            boolean orderAsc = true;
+            int orderIdx = expr.toUpperCase().indexOf(" ORDER BY ");
+            if (orderIdx != -1) {
+                String orderPart = expr.substring(orderIdx + 10).trim();
+                expr = expr.substring(0, orderIdx).trim();
+                if (orderPart.toUpperCase().endsWith(" DESC")) {
+                    orderAsc = false;
+                    orderPart = orderPart.substring(0, orderPart.length() - 5).trim();
+                } else if (orderPart.toUpperCase().endsWith(" ASC")) {
+                    orderAsc = true;
+                    orderPart = orderPart.substring(0, orderPart.length() - 4).trim();
+                }
+                orderCol = orderPart;
+            }
+
+            List<Map<String, Object>> sortedRows = new ArrayList<>(groupRows);
+            if (orderCol != null && !orderCol.isEmpty()) {
+                final String oCol = orderCol;
+                final boolean oAsc = orderAsc;
+                sortedRows.sort((r1, r2) -> {
+                    Object v1 = getRowValueOrEvaluate(r1, oCol);
+                    Object v2 = getRowValueOrEvaluate(r2, oCol);
+                    if (v1 == null && v2 == null) return 0;
+                    if (v1 == null) return oAsc ? -1 : 1;
+                    if (v2 == null) return oAsc ? 1 : -1;
+                    int cmp = SqlCollation.compare(v1.toString(), v2.toString(), null);
+                    return oAsc ? cmp : -cmp;
+                });
+            }
+
+            StringBuilder sb = new StringBuilder();
+            boolean first = true;
+            java.util.Set<String> seen = distinct ? new java.util.HashSet<>() : null;
+
+            for (Map<String, Object> r : sortedRows) {
+                Object val = getRowValueOrEvaluate(r, expr);
+                if (val != null) {
+                    String strVal = val.toString();
+                    if (distinct) {
+                        if (seen.contains(strVal)) continue;
+                        seen.add(strVal);
+                    }
+                    if (!first) sb.append(separator);
+                    sb.append(strVal);
+                    first = false;
+                }
+            }
+            return first ? null : sb.toString();
         }
 
         return null;
@@ -2933,27 +3067,67 @@ public class DatabaseEngine {
                     }
                 }
             } else if (funcUpper.startsWith("LAG(")) {
-                String arg = funcPart.substring(funcPart.indexOf('(') + 1, funcPart.lastIndexOf(')')).trim();
-                Object prevVal = null;
-                for (Map<String, Object> row : winRows) {
-                    Object curVal = getRowValueWithAlias(row, arg, select.aliases);
-                    if (curVal == null) curVal = row.get(arg);
-                    
-                    System.out.println("DEBUG WINDOW: arg='" + arg + "', curVal=" + curVal + ", keys=" + row.keySet());
-                    System.out.println("DEBUG WINDOW PUT: key='" + normalizedFuncExpr + "', val=" + prevVal);
-                    putWindowResult(row, select, projItem, normalizedFuncExpr, prevVal);
-                    prevVal = curVal;
+                String inner = funcPart.substring(funcPart.indexOf('(') + 1, funcPart.lastIndexOf(')')).trim();
+                List<String> lagArgs = parseWindowArgs(inner);
+                if (!lagArgs.isEmpty()) {
+                    String expr = lagArgs.get(0);
+                    int offset = lagArgs.size() >= 2 ? Integer.parseInt(lagArgs.get(1)) : 1;
+                    Object defaultVal = lagArgs.size() >= 3 ? lagArgs.get(2) : null;
+                    for (int i = 0; i < winRows.size(); i++) {
+                        int targetIdx = i - offset;
+                        Object resVal = defaultVal;
+                        if (targetIdx >= 0 && targetIdx < winRows.size()) {
+                            Object v = getRowValueOrEvaluate(winRows.get(targetIdx), expr);
+                            if (v != null) resVal = v;
+                        }
+                        putWindowResult(winRows.get(i), select, projItem, normalizedFuncExpr, resVal);
+                    }
                 }
             } else if (funcUpper.startsWith("LEAD(")) {
-                String arg = funcPart.substring(funcPart.indexOf('(') + 1, funcPart.lastIndexOf(')')).trim();
-                for (int i = 0; i < winRows.size(); i++) {
-                    Map<String, Object> row = winRows.get(i);
-                    Object nextVal = null;
-                    if (i + 1 < winRows.size()) {
-                        nextVal = getRowValueWithAlias(winRows.get(i + 1), arg, select.aliases);
-                        if (nextVal == null) nextVal = winRows.get(i + 1).get(arg);
+                String inner = funcPart.substring(funcPart.indexOf('(') + 1, funcPart.lastIndexOf(')')).trim();
+                List<String> leadArgs = parseWindowArgs(inner);
+                if (!leadArgs.isEmpty()) {
+                    String expr = leadArgs.get(0);
+                    int offset = leadArgs.size() >= 2 ? Integer.parseInt(leadArgs.get(1)) : 1;
+                    Object defaultVal = leadArgs.size() >= 3 ? leadArgs.get(2) : null;
+                    for (int i = 0; i < winRows.size(); i++) {
+                        int targetIdx = i + offset;
+                        Object resVal = defaultVal;
+                        if (targetIdx >= 0 && targetIdx < winRows.size()) {
+                            Object v = getRowValueOrEvaluate(winRows.get(targetIdx), expr);
+                            if (v != null) resVal = v;
+                        }
+                        putWindowResult(winRows.get(i), select, projItem, normalizedFuncExpr, resVal);
                     }
-                    putWindowResult(row, select, projItem, normalizedFuncExpr, nextVal);
+                }
+            } else if (funcUpper.startsWith("FIRST_VALUE(")) {
+                String expr = funcPart.substring(funcPart.indexOf('(') + 1, funcPart.lastIndexOf(')')).trim();
+                for (int i = 0; i < winRows.size(); i++) {
+                    int frameStart = (framePreceding == Integer.MAX_VALUE) ? 0 : Math.max(0, i - framePreceding);
+                    Object resVal = getRowValueOrEvaluate(winRows.get(frameStart), expr);
+                    putWindowResult(winRows.get(i), select, projItem, normalizedFuncExpr, resVal);
+                }
+            } else if (funcUpper.startsWith("LAST_VALUE(")) {
+                String expr = funcPart.substring(funcPart.indexOf('(') + 1, funcPart.lastIndexOf(')')).trim();
+                for (int i = 0; i < winRows.size(); i++) {
+                    int frameEnd = (frameFollowing == Integer.MAX_VALUE) ? winRows.size() - 1 : Math.min(winRows.size() - 1, i + frameFollowing);
+                    Object resVal = getRowValueOrEvaluate(winRows.get(frameEnd), expr);
+                    putWindowResult(winRows.get(i), select, projItem, normalizedFuncExpr, resVal);
+                }
+            } else if (funcUpper.startsWith("NTH_VALUE(")) {
+                String inner = funcPart.substring(funcPart.indexOf('(') + 1, funcPart.lastIndexOf(')')).trim();
+                List<String> nthArgs = parseWindowArgs(inner);
+                if (nthArgs.size() >= 2) {
+                    String expr = nthArgs.get(0);
+                    int n = Integer.parseInt(nthArgs.get(1));
+                    for (int i = 0; i < winRows.size(); i++) {
+                        int targetIdx = n - 1;
+                        Object resVal = null;
+                        if (targetIdx >= 0 && targetIdx < winRows.size()) {
+                            resVal = getRowValueOrEvaluate(winRows.get(targetIdx), expr);
+                        }
+                        putWindowResult(winRows.get(i), select, projItem, normalizedFuncExpr, resVal);
+                    }
                 }
             }
             rows.addAll(winRows);
@@ -2985,6 +3159,37 @@ public class DatabaseEngine {
                 }
             }
         }
+    }
+
+    private List<String> parseWindowArgs(String inner) {
+        List<String> args = new ArrayList<>();
+        if (inner == null || inner.trim().isEmpty()) return args;
+        StringBuilder sb = new StringBuilder();
+        int parenDepth = 0;
+        boolean inStr = false;
+        char strChar = 0;
+        for (int i = 0; i < inner.length(); i++) {
+            char c = inner.charAt(i);
+            if (inStr) {
+                sb.append(c);
+                if (c == strChar) inStr = false;
+            } else if (c == '\'' || c == '"') {
+                inStr = true; strChar = c; sb.append(c);
+            } else if (c == '(') {
+                parenDepth++; sb.append(c);
+            } else if (c == ')') {
+                if (parenDepth > 0) parenDepth--; sb.append(c);
+            } else if (c == ',' && parenDepth == 0) {
+                args.add(sb.toString().trim());
+                sb.setLength(0);
+            } else {
+                sb.append(c);
+            }
+        }
+        if (sb.length() > 0) {
+            args.add(sb.toString().trim());
+        }
+        return args;
     }
 
     private String resolveColumnType(Command.Select select, String colName) {
@@ -3814,29 +4019,58 @@ public class DatabaseEngine {
                 Map<String, Object> firstRow = groupRows.get(0);
                 aggRow.putAll(firstRow);
 
-                if (select.projection != null) {
-                    for (String projItem : select.projection) {
-                        List<int[]> aggMatches = findAggregateMatches(projItem);
-                        for (int[] m : aggMatches) {
-                            String aggExpr = projItem.substring(m[0], m[1]);
-                            aggRow.put(aggExpr, evaluateAggregate(aggExpr, groupRows));
-                        }
-                        if (isAggregate(projItem)) {
-                            Object aggVal = evaluateAggregate(projItem, groupRows);
-                            aggRow.put(projItem, aggVal);
-                            int asIdx = projItem.toUpperCase().lastIndexOf(" AS ");
-                            if (asIdx != -1) {
-                                aggRow.put(projItem.substring(0, asIdx).trim(), aggVal);
-                            }
-                        }
-                    }
-                }
-                if (select.having != null) {
-                    String havingFunc = select.having.aggregateFunc;
-                    aggRow.put(havingFunc, evaluateAggregate(havingFunc, groupRows));
-                }
+                populateAggregatedRow(select, groupRows, aggRow);
                 aggregatedRows.add(aggRow);
             }
+
+            // Handle WITH ROLLUP summary rows
+            if (select.groupBy != null && select.groupBy.withRollup && !joinedRows.isEmpty()) {
+                List<String> gCols = select.groupBy.columns != null ? select.groupBy.columns : java.util.Collections.singletonList(select.groupBy.column);
+                for (int prefixLen = gCols.size() - 1; prefixLen >= 0; prefixLen--) {
+                    Map<Object, List<Map<String, Object>>> rollupGroups = new LinkedHashMap<>();
+                    for (Map<String, Object> row : joinedRows) {
+                        Object rKey;
+                        if (prefixLen == 0) {
+                            rKey = "ROLLUP_TOTAL";
+                        } else if (prefixLen == 1) {
+                            rKey = getRowValueOrEvaluate(row, gCols.get(0));
+                            if (rKey == null) rKey = "NULL";
+                        } else {
+                            List<Object> compositeKey = new ArrayList<>();
+                            for (int i = 0; i < prefixLen; i++) {
+                                Object val = getRowValueOrEvaluate(row, gCols.get(i));
+                                compositeKey.add(val == null ? "NULL" : val);
+                            }
+                            rKey = compositeKey;
+                        }
+                        if (!rollupGroups.containsKey(rKey)) {
+                            rollupGroups.put(rKey, new ArrayList<>());
+                        }
+                        rollupGroups.get(rKey).add(row);
+                    }
+
+                    for (Map.Entry<Object, List<Map<String, Object>>> rEntry : rollupGroups.entrySet()) {
+                        List<Map<String, Object>> rGroupRows = rEntry.getValue();
+                        if (rGroupRows.isEmpty()) continue;
+
+                        Map<String, Object> aggRow = new HashMap<>();
+                        Map<String, Object> firstRow = rGroupRows.get(0);
+                        aggRow.putAll(firstRow);
+
+                        for (int i = prefixLen; i < gCols.size(); i++) {
+                            String colName = gCols.get(i);
+                            aggRow.put(colName, null);
+                            if (select.tableName != null) {
+                                aggRow.put(select.tableName + "." + colName, null);
+                            }
+                        }
+
+                        populateAggregatedRow(select, rGroupRows, aggRow);
+                        aggregatedRows.add(aggRow);
+                    }
+                }
+            }
+
             joinedRows = aggregatedRows;
         }
 
@@ -3969,13 +4203,10 @@ public class DatabaseEngine {
                     type = resolveColumnType(select, col);
                 }
 
-                String displayName = col;
-                String rawExpr = col;
-                int asIdx = col.toUpperCase().lastIndexOf(" AS ");
-                if (asIdx != -1) {
-                    displayName = col.substring(asIdx + 4).trim();
-                    rawExpr = col.substring(0, asIdx).trim();
-                } else if (select.aliases != null) {
+                String[] parts = splitAlias(col);
+                String rawExpr = parts[0];
+                String displayName = parts[1];
+                if (parts[0].equals(parts[1]) && select.aliases != null) {
                     if (select.aliases.containsKey(col)) {
                         displayName = select.aliases.get(col);
                     } else {
@@ -4007,11 +4238,8 @@ public class DatabaseEngine {
                 for (int i = 0; i < effectiveProjection.size(); i++) {
                     String col = effectiveProjection.get(i);
                     String displayName = outColumns.get(i);
-                    String rawExpr = col;
-                    int asIdx = col.toUpperCase().lastIndexOf(" AS ");
-                    if (asIdx != -1) {
-                        rawExpr = col.substring(0, asIdx).trim();
-                    }
+                    String[] parts = splitAlias(col);
+                    String rawExpr = parts[0];
 
                     Object val = getRowValue(row, col);
                     if (val == null) val = getRowValue(row, rawExpr);
@@ -4123,7 +4351,58 @@ public class DatabaseEngine {
         }
     }
 
+    private void populateAggregatedRow(Command.Select select, List<Map<String, Object>> groupRows, Map<String, Object> aggRow) throws Exception {
+        if (select.projection != null) {
+            for (String projItem : select.projection) {
+                List<int[]> aggMatches = findAggregateMatches(projItem);
+                for (int[] m : aggMatches) {
+                    String aggExpr = projItem.substring(m[0], m[1]);
+                    aggRow.put(aggExpr, evaluateAggregate(aggExpr, groupRows));
+                }
+                if (isAggregate(projItem)) {
+                    Object aggVal = evaluateAggregate(projItem, groupRows);
+                    aggRow.put(projItem, aggVal);
+                    int asIdx = projItem.toUpperCase().lastIndexOf(" AS ");
+                    if (asIdx != -1) {
+                        aggRow.put(projItem.substring(0, asIdx).trim(), aggVal);
+                    }
+                }
+            }
+        }
+        if (select.having != null && select.having.aggregateFunc != null) {
+            String havingFunc = select.having.aggregateFunc;
+            aggRow.put(havingFunc, evaluateAggregate(havingFunc, groupRows));
+        }
+    }
+
+    public static String[] splitAlias(String col) {
+        if (col == null) return new String[]{"", ""};
+        int len = col.length();
+        int parenDepth = 0;
+        int lastAsIdx = -1;
+        for (int i = 0; i < len; i++) {
+            char c = col.charAt(i);
+            if (c == '(') parenDepth++;
+            else if (c == ')') { if (parenDepth > 0) parenDepth--; }
+            else if (parenDepth == 0 && i + 4 <= len) {
+                if (" AS ".equalsIgnoreCase(col.substring(i, i + 4))) {
+                    lastAsIdx = i;
+                }
+            }
+        }
+        if (lastAsIdx != -1) {
+            String expr = col.substring(0, lastAsIdx).trim();
+            String alias = col.substring(lastAsIdx + 4).trim();
+            return new String[]{expr, alias};
+        }
+        return new String[]{col, col};
+    }
+
     public QueryResult updateTable(String tableName, Map<String, Object> updates, Clause.Where where) throws Exception {
+        return updateTable(tableName, updates, where, null, true, null);
+    }
+
+    public QueryResult updateTable(String tableName, Map<String, Object> updates, Clause.Where where, String orderByColumn, boolean orderAsc, Integer limit) throws Exception {
         tableName = resolveTableName(tableName);
         verifyPrivilege("UPDATE", activeDatabaseName, tableName);
         TableData td = getOrLoadTable(tableName);
@@ -4159,9 +4438,24 @@ public class DatabaseEngine {
             }
         }
 
+        List<Map<String, Object>> targetRows = new ArrayList<>(td.rows);
+        if (orderByColumn != null && !orderByColumn.isEmpty()) {
+            String colName = orderByColumn;
+            boolean asc = orderAsc;
+            Collections.sort(targetRows, (r1, r2) -> {
+                Object v1 = getRowValue(r1, colName);
+                Object v2 = getRowValue(r2, colName);
+                int comp = compareValuesForSort(v1, v2);
+                return asc ? comp : -comp;
+            });
+        }
+
         int affected = 0;
         String collation = (where != null) ? resolveCollation(where.column) : null;
-        for (Map<String, Object> row : td.rows) {
+        for (Map<String, Object> row : targetRows) {
+            if (limit != null && affected >= limit) {
+                break;
+            }
             if (where == null || where.evaluate(row, collation, this)) {
                 Map<String, Object> updatedRow = new HashMap<>(row);
                 for (Map.Entry<String, Object> entry : updates.entrySet()) {
@@ -4209,17 +4503,34 @@ public class DatabaseEngine {
     }
 
     public QueryResult deleteFrom(String tableName, Clause.Where where) throws Exception {
+        return deleteFrom(tableName, where, null, true, null);
+    }
+
+    public QueryResult deleteFrom(String tableName, Clause.Where where, String orderByColumn, boolean orderAsc, Integer limit) throws Exception {
         tableName = resolveTableName(tableName);
         verifyPrivilege("DELETE", activeDatabaseName, tableName);
         TableData td = getOrLoadTable(tableName);
 
+        List<Map<String, Object>> targetRows = new ArrayList<>(td.rows);
+        if (orderByColumn != null && !orderByColumn.isEmpty()) {
+            String colName = orderByColumn;
+            boolean asc = orderAsc;
+            Collections.sort(targetRows, (r1, r2) -> {
+                Object v1 = getRowValue(r1, colName);
+                Object v2 = getRowValue(r2, colName);
+                int comp = compareValuesForSort(v1, v2);
+                return asc ? comp : -comp;
+            });
+        }
+
         int affected = 0;
         String collation = (where != null) ? resolveCollation(where.column) : null;
-        Iterator<Map<String, Object>> it = td.rows.iterator();
-        while (it.hasNext()) {
-            Map<String, Object> row = it.next();
+        for (Map<String, Object> row : targetRows) {
+            if (limit != null && affected >= limit) {
+                break;
+            }
             if (where == null || where.evaluate(row, collation, this)) {
-                it.remove();
+                td.rows.remove(row);
                 affected++;
             }
         }
@@ -4237,6 +4548,9 @@ public class DatabaseEngine {
 
     public void validateWhereColumns(Clause.Where where, List<String> validColumns) throws Exception {
         if (where == null || validColumns == null || validColumns.isEmpty()) return;
+        if ("EXISTS".equalsIgnoreCase(where.operator) || "NOT EXISTS".equalsIgnoreCase(where.operator)) {
+            return;
+        }
         if (where.logicalOperator != null && where.subConditions != null) {
             for (Clause.Where sub : where.subConditions) {
                 validateWhereColumns(sub, validColumns);
@@ -4401,7 +4715,7 @@ public class DatabaseEngine {
     private void renameAndSetKey(JSONObject parent, String fieldName, String oldKey, String newKey, Object newVal) throws Exception {
         JSONObject obj = parent.optJSONObject(fieldName);
         if (obj != null) {
-            obj.remove(oldKey);
+            removeKey(parent, fieldName, oldKey);
             obj.put(newKey, newVal == null ? JSONObject.NULL : newVal);
         }
     }
@@ -4409,7 +4723,17 @@ public class DatabaseEngine {
     private void removeKey(JSONObject parent, String fieldName, String key) {
         JSONObject obj = parent.optJSONObject(fieldName);
         if (obj != null) {
-            obj.remove(key);
+            Iterator<String> iks = obj.keys();
+            List<String> toRemove = new ArrayList<>();
+            while (iks.hasNext()) {
+                String k = iks.next();
+                if (k.equalsIgnoreCase(key)) {
+                    toRemove.add(k);
+                }
+            }
+            for (String r : toRemove) {
+                obj.remove(r);
+            }
         }
     }
 
@@ -4505,9 +4829,11 @@ public class DatabaseEngine {
         } else if ("MODIFY_COLUMN".equals(cmd.operation)) {
             Command.ColumnDef cd = cmd.columnDef;
             int idx = -1;
+            String targetCol = cd.name;
             for (int i = 0; i < colsArr.length(); i++) {
                 if (colsArr.getString(i).equalsIgnoreCase(cd.name)) {
                     idx = i;
+                    targetCol = colsArr.getString(i);
                     break;
                 }
             }
@@ -4516,31 +4842,72 @@ public class DatabaseEngine {
             }
             typesArr.put(idx, cd.type.toUpperCase());
             
+            removeKey(tableSchema, "defaults", targetCol);
+            removeKey(tableSchema, "nullables", targetCol);
+            removeKey(tableSchema, "keys", targetCol);
+            removeKey(tableSchema, "extras", targetCol);
+            removeKey(tableSchema, "on_update", targetCol);
+            removeKey(tableSchema, "attributes", targetCol);
+
             JSONObject defaults = tableSchema.optJSONObject("defaults");
-            if (defaults != null) {
-                defaults.put(cd.name, cd.defaultValue == null ? JSONObject.NULL : cd.defaultValue);
+            if (defaults == null) {
+                defaults = new JSONObject();
+                tableSchema.put("defaults", defaults);
             }
+            defaults.put(targetCol, cd.defaultValue == null ? JSONObject.NULL : cd.defaultValue);
+
             JSONObject nullables = tableSchema.optJSONObject("nullables");
-            if (nullables != null) {
-                nullables.put(cd.name, cd.nullable);
+            if (nullables == null) {
+                nullables = new JSONObject();
+                tableSchema.put("nullables", nullables);
             }
+            nullables.put(targetCol, cd.nullable);
+
             JSONObject keys = tableSchema.optJSONObject("keys");
-            if (keys != null) {
-                keys.put(cd.name, cd.isPrimaryKey ? "PRI" : (cd.isUnique ? "UNI" : ""));
+            if (keys == null) {
+                keys = new JSONObject();
+                tableSchema.put("keys", keys);
             }
-            JSONObject extras = tableSchema.optJSONObject("extras");
-            if (extras != null) {
-                if (cd.isAutoIncrement) {
-                    extras.put(cd.name, "auto_increment");
-                } else if (cd.onUpdateValue != null && SqlDefaults.isCurrentTimestampFunction(cd.onUpdateValue)) {
-                    if (SqlDefaults.isCurrentTimestampFunction(cd.defaultValue)) {
-                        extras.put(cd.name, "DEFAULT_GENERATED on update " + cd.onUpdateValue.toUpperCase());
-                    } else {
-                        extras.put(cd.name, "on update " + cd.onUpdateValue.toUpperCase());
+            if (cd.isPrimaryKey) {
+                keys.put(targetCol, "PRI");
+            } else if (cd.isUnique) {
+                keys.put(targetCol, "UNI");
+            } else {
+                JSONArray pkArr = tableSchema.optJSONArray("primary_key");
+                boolean isPk = false;
+                if (pkArr != null) {
+                    for (int p = 0; p < pkArr.length(); p++) {
+                        if (pkArr.getString(p).equalsIgnoreCase(targetCol)) {
+                            isPk = true;
+                            break;
+                        }
                     }
-                } else {
-                    extras.put(cd.name, "");
                 }
+                if (isPk) {
+                    keys.put(targetCol, "PRI");
+                } else {
+                    keys.put(targetCol, "");
+                }
+            }
+
+            JSONObject extras = tableSchema.optJSONObject("extras");
+            if (extras == null) {
+                extras = new JSONObject();
+                tableSchema.put("extras", extras);
+            }
+            if (cd.isAutoIncrement) {
+                extras.put(targetCol, "auto_increment");
+                if (!tableSchema.has("auto_increment")) {
+                    tableSchema.put("auto_increment", 1L);
+                }
+            } else if (cd.onUpdateValue != null && SqlDefaults.isCurrentTimestampFunction(cd.onUpdateValue)) {
+                if (SqlDefaults.isCurrentTimestampFunction(cd.defaultValue)) {
+                    extras.put(targetCol, "DEFAULT_GENERATED on update " + cd.onUpdateValue.toUpperCase());
+                } else {
+                    extras.put(targetCol, "on update " + cd.onUpdateValue.toUpperCase());
+                }
+            } else {
+                extras.put(targetCol, "");
             }
 
             JSONObject onUpdate = tableSchema.optJSONObject("on_update");
@@ -4548,7 +4915,7 @@ public class DatabaseEngine {
                 onUpdate = new JSONObject();
                 tableSchema.put("on_update", onUpdate);
             }
-            onUpdate.put(cd.name, cd.onUpdateValue == null ? JSONObject.NULL : cd.onUpdateValue);
+            onUpdate.put(targetCol, cd.onUpdateValue == null ? JSONObject.NULL : cd.onUpdateValue);
 
             JSONObject attributes = tableSchema.optJSONObject("attributes");
             if (attributes == null) {
@@ -4556,13 +4923,13 @@ public class DatabaseEngine {
                 tableSchema.put("attributes", attributes);
             }
             if (cd.attributes != null) {
-                attributes.put(cd.name, cd.attributes.toJsonObject());
+                attributes.put(targetCol, cd.attributes.toJsonObject());
             } else {
-                attributes.put(cd.name, new JSONObject());
+                attributes.put(targetCol, new JSONObject());
             }
 
             if (cmd.position != null) {
-                moveColumnPosition(colsArr, typesArr, cd.name, cmd.position, cmd.targetColumn);
+                moveColumnPosition(colsArr, typesArr, targetCol, cmd.position, cmd.targetColumn);
             }
         } else if ("CHANGE_COLUMN".equals(cmd.operation)) {
             String oldCol = cmd.columnName;
@@ -5053,19 +5420,51 @@ public class DatabaseEngine {
                 }
             }
         } else if ("ADD_CHECK".equals(cmd.operation)) {
+            JSONObject chkObj = new JSONObject(cmd.checkConstraint);
+            String targetCol = chkObj.optString("column");
+            if (targetCol != null && !targetCol.isEmpty()) {
+                boolean colFound = false;
+                for (int cIdx = 0; cIdx < colsArr.length(); cIdx++) {
+                    if (colsArr.getString(cIdx).equalsIgnoreCase(targetCol)) {
+                        targetCol = colsArr.getString(cIdx);
+                        colFound = true;
+                        break;
+                    }
+                }
+                if (!colFound) {
+                    throw new Exception("Error: Key column '" + targetCol + "' doesn't exist in table");
+                }
+                chkObj.put("column", targetCol);
+            }
+
             JSONArray checks = tableSchema.optJSONArray("checks");
             if (checks == null) {
                 checks = new JSONArray();
                 tableSchema.put("checks", checks);
             }
-            JSONObject chkObj = new JSONObject(cmd.checkConstraint);
+
             if (cmd.constraintName != null) {
+                for (int i = 0; i < checks.length(); i++) {
+                    JSONObject existingChk = checks.getJSONObject(i);
+                    if (cmd.constraintName.equalsIgnoreCase(existingChk.optString("name"))) {
+                        throw new Exception("Error: Duplicate constraint name '" + cmd.constraintName + "'");
+                    }
+                }
+                JSONObject indexesObj = tableSchema.optJSONObject("indexes");
+                if (indexesObj != null) {
+                    Iterator<String> iks = indexesObj.keys();
+                    while (iks.hasNext()) {
+                        if (iks.next().equalsIgnoreCase(cmd.constraintName)) {
+                            throw new Exception("Error: Duplicate constraint name '" + cmd.constraintName + "'");
+                        }
+                    }
+                }
                 chkObj.put("name", cmd.constraintName);
             }
             checks.put(chkObj);
-        } else if ("DROP_CHECK".equals(cmd.operation)) {
-            JSONArray checks = tableSchema.optJSONArray("checks");
+        } else if ("DROP_CHECK".equals(cmd.operation) || "DROP_CONSTRAINT".equals(cmd.operation)) {
             boolean removed = false;
+            JSONArray checks = tableSchema.optJSONArray("checks");
             if (checks != null) {
                 for (int i = checks.length() - 1; i >= 0; i--) {
                     JSONObject chk = checks.getJSONObject(i);
@@ -5089,11 +5488,69 @@ public class DatabaseEngine {
                     }
                 }
             }
+
+            if (!removed && "DROP_CONSTRAINT".equals(cmd.operation)) {
+                JSONObject fks = tableSchema.optJSONObject("foreign_keys");
+                if (fks != null && fks.has(cmd.constraintName)) {
+                    fks.remove(cmd.constraintName);
+                    removed = true;
+                }
+            }
+
+            if (!removed && "DROP_CONSTRAINT".equals(cmd.operation)) {
+                JSONObject indexesObj = tableSchema.optJSONObject("indexes");
+                if (indexesObj != null) {
+                    String matchedKey = null;
+                    Iterator<String> iks = indexesObj.keys();
+                    while (iks.hasNext()) {
+                        String k = iks.next();
+                        if (k.equalsIgnoreCase(cmd.constraintName)) {
+                            matchedKey = k;
+                            break;
+                        }
+                    }
+                    if (matchedKey != null) {
+                        JSONObject idxMeta = indexesObj.getJSONObject(matchedKey);
+                        JSONArray cols = idxMeta.optJSONArray("columns");
+                        JSONArray uniques = tableSchema.optJSONArray("uniques");
+                        if (cols != null && uniques != null) {
+                            for (int i = uniques.length() - 1; i >= 0; i--) {
+                                JSONArray group = uniques.getJSONArray(i);
+                                if (group.length() == cols.length()) {
+                                    boolean groupMatch = true;
+                                    for (int j = 0; j < group.length(); j++) {
+                                        if (!group.getString(j).equalsIgnoreCase(cols.getString(j))) {
+                                            groupMatch = false;
+                                            break;
+                                        }
+                                    }
+                                    if (groupMatch) {
+                                        JSONObject keys = tableSchema.optJSONObject("keys");
+                                        if (keys != null) {
+                                            for (int j = 0; j < group.length(); j++) {
+                                                keys.put(group.getString(j), "");
+                                            }
+                                        }
+                                        uniques.remove(i);
+                                    }
+                                }
+                            }
+                        }
+                        indexesObj.remove(matchedKey);
+                        removed = true;
+                    }
+                }
+            }
+
             if (!removed) {
                 throw new Exception("Error: Constraint '" + cmd.constraintName + "' does not exist");
             }
         } else if ("AUTO_INCREMENT".equals(cmd.operation)) {
             tableSchema.put("auto_increment", cmd.autoIncrementValue);
+            TableData td = tableCache.get(tableName);
+            if (td != null) {
+                td.autoIncrementCounters.clear();
+            }
         }
 
         storageEngine.writeSchema(activeDatabaseName, activeSchemaJson);
@@ -5736,8 +6193,142 @@ public class DatabaseEngine {
         return QueryResult.createSelectSuccess(columns, types, rows, 0);
     }
 
+    public synchronized QueryResult showTableStatus(String databaseName, String likePattern, Clause.Where where) throws Exception {
+        String targetDb = databaseName != null ? databaseName : activeDatabaseName;
+        if (targetDb == null) {
+            throw new Exception("No database selected");
+        }
+        verifyPrivilege("SELECT", targetDb, "*");
+
+        JSONObject schemaJson;
+        if (targetDb.equalsIgnoreCase(activeDatabaseName) && activeSchemaJson != null) {
+            schemaJson = activeSchemaJson;
+        } else {
+            schemaJson = storageEngine.readSchema(targetDb);
+        }
+
+        List<String> columns = new ArrayList<>();
+        columns.add("Name");
+        columns.add("Engine");
+        columns.add("Version");
+        columns.add("Row_format");
+        columns.add("Rows");
+        columns.add("Avg_row_length");
+        columns.add("Data_length");
+        columns.add("Max_data_length");
+        columns.add("Index_length");
+        columns.add("Data_free");
+        columns.add("Auto_increment");
+        columns.add("Create_time");
+        columns.add("Update_time");
+        columns.add("Check_time");
+        columns.add("Collation");
+        columns.add("Checksum");
+        columns.add("Create_options");
+        columns.add("Comment");
+
+        List<String> types = new ArrayList<>();
+        types.add("VARCHAR");
+        types.add("VARCHAR");
+        types.add("BIGINT");
+        types.add("VARCHAR");
+        types.add("BIGINT");
+        types.add("BIGINT");
+        types.add("BIGINT");
+        types.add("BIGINT");
+        types.add("BIGINT");
+        types.add("BIGINT");
+        types.add("BIGINT");
+        types.add("DATETIME");
+        types.add("DATETIME");
+        types.add("DATETIME");
+        types.add("VARCHAR");
+        types.add("VARCHAR");
+        types.add("VARCHAR");
+        types.add("VARCHAR");
+
+        List<Map<String, Object>> resultRows = new ArrayList<>();
+        if (schemaJson != null) {
+            Iterator<String> keys = schemaJson.keys();
+            List<String> tableNames = new ArrayList<>();
+            while (keys.hasNext()) {
+                String k = keys.next();
+                if (!k.startsWith("__")) {
+                    tableNames.add(k);
+                }
+            }
+            Collections.sort(tableNames);
+
+            for (String tblName : tableNames) {
+                JSONObject tblSchema = schemaJson.optJSONObject(tblName);
+                if (tblSchema == null) continue;
+                boolean isView = tblSchema.optBoolean("is_view", false);
+                if (isView) continue;
+
+                if (likePattern != null && !likePattern.isEmpty()) {
+                    String regex = "^" + java.util.regex.Pattern.quote(likePattern)
+                            .replace("%", ".*")
+                            .replace("_", ".") + "$";
+                    if (!tblName.matches("(?i)" + regex)) {
+                        continue;
+                    }
+                }
+
+                int rowCount = 0;
+                long dataLength = 0;
+                try {
+                    JSONArray rowsArr = storageEngine.readTableRows(targetDb, tblName);
+                    if (rowsArr != null) {
+                        rowCount = rowsArr.length();
+                        dataLength = rowsArr.toString().getBytes("UTF-8").length;
+                    }
+                } catch (Exception ignored) {}
+
+                Object autoIncVal = JSONObject.NULL;
+                if (tblSchema.has("auto_increment")) {
+                    autoIncVal = tblSchema.optLong("auto_increment", 1L);
+                }
+
+                Map<String, Object> rowMap = new HashMap<>();
+                rowMap.put("Name", tblName);
+                rowMap.put("name", tblName);
+                rowMap.put("NAME", tblName);
+                rowMap.put("Engine", "InnoDB");
+                rowMap.put("engine", "InnoDB");
+                rowMap.put("ENGINE", "InnoDB");
+                rowMap.put("Version", 10L);
+                rowMap.put("Row_format", "Dynamic");
+                rowMap.put("Rows", (long) rowCount);
+                rowMap.put("rows", (long) rowCount);
+                rowMap.put("Avg_row_length", rowCount > 0 ? dataLength / rowCount : 0L);
+                rowMap.put("Data_length", dataLength);
+                rowMap.put("Max_data_length", 0L);
+                rowMap.put("Index_length", 0L);
+                rowMap.put("Data_free", 0L);
+                rowMap.put("Auto_increment", autoIncVal);
+                rowMap.put("auto_increment", autoIncVal);
+                rowMap.put("Create_time", "2026-01-01 00:00:00");
+                rowMap.put("Update_time", JSONObject.NULL);
+                rowMap.put("Check_time", JSONObject.NULL);
+                rowMap.put("Collation", "utf8mb4_0900_ai_ci");
+                rowMap.put("Checksum", JSONObject.NULL);
+                rowMap.put("Create_options", "");
+                rowMap.put("Comment", "");
+
+                if (where != null && !where.evaluate(rowMap, null, this)) {
+                    continue;
+                }
+
+                resultRows.add(rowMap);
+            }
+        }
+
+        return QueryResult.createSelectSuccess(columns, types, resultRows, 0);
+    }
+
     public synchronized QueryResult showCreateTable(String tableName) throws Exception {
         ensureActiveSchema();
+        tableName = resolveTableName(tableName);
         if (!activeSchemaJson.has(tableName)) {
             throw new Exception("Error: Table '" + tableName + "' does not exist");
         }

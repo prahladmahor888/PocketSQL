@@ -12,39 +12,16 @@ public class SqlScanner {
 
     private static final Set<String> KEYWORDS = new HashSet<>();
     static {
-        String[] keywords = {
-            // DML / DDL
-            "WITH", "SELECT", "FROM", "WHERE", "INSERT", "INTO", "VALUES", "UPDATE", "SET", "DELETE",
-            "CREATE", "DATABASE", "DROP", "USE", "TABLE", "SHOW", "DATABASES", "TABLES",
-            "DESCRIBE", "DESC", "IF", "NOT", "EXISTS", "ORDER", "BY", "LIMIT", "ASC",
-            "LIKE", "AND", "OR", "NULL", "CALL", "HELP",
-            "USER", "IDENTIFIED", "GRANT", "PRIVILEGES", "FLUSH", "ON", "TO", "EXPORT", "IMPORT",
-            "ALTER", "TRUNCATE", "RENAME", "REVOKE", "START", "TRANSACTION", "BEGIN", "COMMIT", "ROLLBACK", "SAVEPOINT", "ADD",
-            "JOIN", "INNER", "LEFT", "RIGHT", "CROSS", "UNION", "ALL", "DISTINCT", "AS", "GROUP", "HAVING", "IS",
-            "COLUMN", "COLUMNS", "FIRST", "AFTER", "ENGINE", "CHARACTER", "MODIFY", "CHANGE", "CONSTRAINT", "CONVERT", "COLLATE", "CHARSET",
-            "FUNCTION", "RETURNS", "RETURN", "DECLARE", "END", "THEN", "ELSE", "WHILE", "LOOP", "REPEAT", "UNTIL", "CASE", "WHEN", "STATUS",
-            "OVER", "PARTITION",
-            // Column constraints
-            "PRIMARY", "KEY", "AUTO_INCREMENT", "UNIQUE", "DEFAULT", "COMMENT", "DUPLICATE",
-            "FOREIGN", "REFERENCES", "CHECK", "BETWEEN", "IN", "INDEX", "FULLTEXT", "SPATIAL", "NO", "ACTION", "RESTRICT", "CASCADE",
-            "UNSIGNED", "SIGNED", "ZEROFILL", "VISIBLE", "INVISIBLE", "GENERATED", "ALWAYS", "AS", "VIRTUAL", "STORED",
-            // ── Numeric types ──
-            "TINYINT", "SMALLINT", "MEDIUMINT", "INT", "INTEGER", "BIGINT",
-            "FLOAT", "DOUBLE", "DECIMAL", "NUMERIC", "BIT",
-            // ── String types ──
-            "CHAR", "VARCHAR", "TINYTEXT", "TEXT", "MEDIUMTEXT", "LONGTEXT",
-            "BINARY", "VARBINARY", "BLOB", "TINYBLOB", "MEDIUMBLOB", "LONGBLOB",
-            "ENUM", "SET",
-            // ── Date/time types ──
-            "DATE", "TIME", "DATETIME", "TIMESTAMP", "YEAR",
-            // ── JSON ──
-            "JSON",
-            // ── Spatial types ──
-            "GEOMETRY", "POINT", "LINESTRING", "POLYGON",
-            "MULTIPOINT", "MULTILINESTRING", "MULTIPOLYGON", "GEOMETRYCOLLECTION"
-        };
-        for (String kw : keywords) {
-            KEYWORDS.add(kw.toUpperCase());
+        for (String raw : SqlKeywordSuggester.getKeywords()) {
+            if (raw == null) continue;
+            // Clean function parentheses e.g. "CONCAT()" -> "CONCAT"
+            String cleaned = raw.replaceAll("\\(\\)", "").trim();
+            // Split multi-word keywords e.g. "NOT NULL" -> "NOT", "NULL"
+            for (String part : cleaned.split("\\s+")) {
+                if (!part.isEmpty()) {
+                    KEYWORDS.add(part.toUpperCase());
+                }
+            }
         }
     }
 
@@ -57,6 +34,7 @@ public class SqlScanner {
     public List<SqlToken> scan() throws SqlSyntaxException {
         List<SqlToken> tokens = new ArrayList<>();
         while (pos < length) {
+            int tokenPos = pos;
             char c = input.charAt(pos);
 
             // 1. Skip whitespace
@@ -66,15 +44,67 @@ public class SqlScanner {
             }
 
             // 2. Skip Comments
-            if (c == '#' || (c == '-' && pos + 1 < length && input.charAt(pos + 1) == '-')) {
-                // Consume until newline
-                while (pos < length && input.charAt(pos) != '\n' && input.charAt(pos) != '\r') {
+            // Block comments /* ... */
+            if (c == '/' && pos + 1 < length && input.charAt(pos + 1) == '*') {
+                pos += 2;
+                while (pos < length) {
+                    if (input.charAt(pos) == '*' && pos + 1 < length && input.charAt(pos + 1) == '/') {
+                        pos += 2;
+                        break;
+                    }
                     pos++;
                 }
                 continue;
             }
 
-            int tokenPos = pos;
+            // Single line comments -- or #
+            if (c == '#' || (c == '-' && pos + 1 < length && input.charAt(pos + 1) == '-')) {
+                if (c == '-') {
+                    if (pos + 2 < length) {
+                        char nextChar = input.charAt(pos + 2);
+                        if (!Character.isWhitespace(nextChar) && nextChar != '\n' && nextChar != '\r') {
+                            tokens.add(new SqlToken(SqlToken.Type.SYMBOL, "-", tokenPos));
+                            pos++;
+                            continue;
+                        }
+                    }
+                }
+
+                boolean hasNewline = input.indexOf('\n', pos) != -1 || input.indexOf('\r', pos) != -1;
+                pos += (c == '#' ? 1 : 2);
+
+                if (hasNewline) {
+                    while (pos < length && input.charAt(pos) != '\n' && input.charAt(pos) != '\r') {
+                        pos++;
+                    }
+                } else {
+                    int commentStart = pos;
+                    int nextBoundary = length;
+                    for (int p = commentStart; p < length; p++) {
+                        char ch = input.charAt(p);
+                        if (Character.isLetter(ch)) {
+                            int wordEnd = p;
+                            while (wordEnd < length && (Character.isLetterOrDigit(input.charAt(wordEnd)) || input.charAt(wordEnd) == '_')) {
+                                wordEnd++;
+                            }
+                            String word = input.substring(p, wordEnd).toUpperCase();
+                            int afterWord = wordEnd;
+                            while (afterWord < length && Character.isWhitespace(input.charAt(afterWord))) {
+                                afterWord++;
+                            }
+                            boolean isFuncCall = (afterWord < length && input.charAt(afterWord) == '(');
+                            boolean isClauseKw = KEYWORDS.contains(word) && ("SELECT".equals(word) || "FROM".equals(word) || "WHERE".equals(word) || "GROUP".equals(word) || "ORDER".equals(word) || "HAVING".equals(word) || "LIMIT".equals(word) || "JOIN".equals(word) || "SET".equals(word) || "VALUES".equals(word) || "INSERT".equals(word) || "UPDATE".equals(word) || "DELETE".equals(word));
+                            
+                            if ((isFuncCall || isClauseKw) && p > commentStart + 1) {
+                                nextBoundary = p;
+                                break;
+                            }
+                        }
+                    }
+                    pos = nextBoundary;
+                }
+                continue;
+            }
 
             // 3. Match Operators & Symbols (2-char symbols first)
             if (c == '!' && pos + 1 < length && input.charAt(pos + 1) == '=') {
@@ -97,9 +127,19 @@ public class SqlScanner {
                 pos += 2;
                 continue;
             }
+            if (c == '<' && pos + 1 < length && input.charAt(pos + 1) == '<') {
+                tokens.add(new SqlToken(SqlToken.Type.SYMBOL, "<<", tokenPos));
+                pos += 2;
+                continue;
+            }
+            if (c == '>' && pos + 1 < length && input.charAt(pos + 1) == '>') {
+                tokens.add(new SqlToken(SqlToken.Type.SYMBOL, ">>", tokenPos));
+                pos += 2;
+                continue;
+            }
 
             // 1-char symbols
-            if (c == '=' || c == '<' || c == '>' || c == '(' || c == ')' || c == ',' || c == ';' || c == '*' || c == '.' || c == '@' || c == '+' || c == '-' || c == '/' || c == '%') {
+            if (c == '=' || c == '<' || c == '>' || c == '(' || c == ')' || c == ',' || c == ';' || c == '*' || c == '.' || c == '@' || c == '+' || c == '-' || c == '/' || c == '%' || c == '|' || c == '&' || c == '^' || c == '~' || c == ':' || c == '?') {
                 tokens.add(new SqlToken(SqlToken.Type.SYMBOL, String.valueOf(c), tokenPos));
                 pos++;
                 continue;

@@ -44,18 +44,18 @@
                     android:textSize="14sp" />
             </HorizontalScrollView>
 
-            <!-- Command Input Line – always full width, no horizontal scroll -->
-            <LinearLayout
+            <!-- Command Input Area – FrameLayout overlaying prompt and full-width multiline EditText -->
+            <FrameLayout
+                android:id="@+id/layoutInputArea"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:gravity="center_vertical"
-                android:orientation="horizontal"
                 android:layout_marginTop="4dp">
 
                 <TextView
                     android:id="@+id/tvTerminalPrompt"
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
+                    android:layout_gravity="top|start"
                     android:letterSpacing="0.0"
                     android:text="@string/prompt_default"
                     android:textColor="#FFFFFF"
@@ -66,18 +66,21 @@
                     android:id="@+id/etCommandInput"
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
+                    android:layout_gravity="top|start"
                     android:background="@null"
                     android:cursorVisible="true"
                     android:letterSpacing="0.0"
                     android:imeOptions="actionSend"
-                    android:inputType="text|textNoSuggestions"
-                    android:singleLine="true"
-                    android:paddingHorizontal="6dp"
+                    android:inputType="textMultiLine|textNoSuggestions"
+                    android:scrollHorizontally="false"
+                    android:paddingHorizontal="0dp"
+                    android:paddingTop="0dp"
+                    android:paddingBottom="0dp"
                     android:textColor="#FFFFFF"
                     android:textCursorDrawable="@null"
                     android:textSize="14sp"
                     tools:ignore="SpeakableTextPresentCheck,TouchTargetSizeCheck" />
-            </LinearLayout>
+            </FrameLayout>
         </LinearLayout>
     </ScrollView>
 

@@ -177,6 +177,7 @@ public interface Command {
         public final List<String> columnNames;
         public final List<List<Object>> valuesList;
         public java.util.Map<String, String> updateAssignments = null;
+        public boolean ignore = false;
 
         public Command.Select selectQuery = null;
 
@@ -196,9 +197,9 @@ public interface Command {
         @Override
         public QueryResult execute(DatabaseEngine engine) throws Exception {
             if (selectQuery != null) {
-                return engine.insertIntoSelect(tableName, columnNames, selectQuery);
+                return engine.insertIntoSelect(tableName, columnNames, selectQuery, ignore);
             }
-            return engine.insertInto(tableName, columnNames, valuesList, updateAssignments);
+            return engine.insertInto(tableName, columnNames, valuesList, updateAssignments, ignore);
         }
     }
 
@@ -288,31 +289,51 @@ public interface Command {
         public final String tableName;
         public final Map<String, Object> updates;
         public final Clause.Where where;
+        public final String orderByColumn;
+        public final boolean orderAsc;
+        public final Integer limit;
 
         public Update(String tableName, Map<String, Object> updates, Clause.Where where) {
+            this(tableName, updates, where, null, true, null);
+        }
+
+        public Update(String tableName, Map<String, Object> updates, Clause.Where where, String orderByColumn, boolean orderAsc, Integer limit) {
             this.tableName = tableName;
             this.updates = updates;
             this.where = where;
+            this.orderByColumn = orderByColumn;
+            this.orderAsc = orderAsc;
+            this.limit = limit;
         }
 
         @Override
         public QueryResult execute(DatabaseEngine engine) throws Exception {
-            return engine.updateTable(tableName, updates, where);
+            return engine.updateTable(tableName, updates, where, orderByColumn, orderAsc, limit);
         }
     }
 
     class Delete implements Command {
         public final String tableName;
         public final Clause.Where where;
+        public final String orderByColumn;
+        public final boolean orderAsc;
+        public final Integer limit;
 
         public Delete(String tableName, Clause.Where where) {
+            this(tableName, where, null, true, null);
+        }
+
+        public Delete(String tableName, Clause.Where where, String orderByColumn, boolean orderAsc, Integer limit) {
             this.tableName = tableName;
             this.where = where;
+            this.orderByColumn = orderByColumn;
+            this.orderAsc = orderAsc;
+            this.limit = limit;
         }
 
         @Override
         public QueryResult execute(DatabaseEngine engine) throws Exception {
-            return engine.deleteFrom(tableName, where);
+            return engine.deleteFrom(tableName, where, orderByColumn, orderAsc, limit);
         }
     }
 
@@ -345,6 +366,23 @@ public interface Command {
         @Override
         public QueryResult execute(DatabaseEngine engine) throws Exception {
             return engine.showTables(databaseName, full, where);
+        }
+    }
+
+    class ShowTableStatus implements Command {
+        public final String databaseName;
+        public final String likePattern;
+        public final Clause.Where where;
+
+        public ShowTableStatus(String databaseName, String likePattern, Clause.Where where) {
+            this.databaseName = databaseName;
+            this.likePattern = likePattern;
+            this.where = where;
+        }
+
+        @Override
+        public QueryResult execute(DatabaseEngine engine) throws Exception {
+            return engine.showTableStatus(databaseName, likePattern, where);
         }
     }
 

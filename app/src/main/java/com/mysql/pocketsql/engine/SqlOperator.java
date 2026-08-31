@@ -24,6 +24,8 @@ public class SqlOperator {
     public enum Type {
         /** +  -  *  /  % */
         ARITHMETIC,
+        /** |  &  ^  <<  >>  ~ */
+        BITWISE,
         /** =  !=  <>  >  <  >=  <= */
         COMPARISON,
         /** AND  OR  NOT */
@@ -41,6 +43,8 @@ public class SqlOperator {
         switch (op.toUpperCase()) {
             case "+": case "-": case "*": case "/": case "%":
                 return Type.ARITHMETIC;
+            case "|": case "&": case "^": case "<<": case ">>": case "~":
+                return Type.BITWISE;
             case "=": case "!=": case "<>":
             case ">": case "<": case ">=": case "<=":
                 return Type.COMPARISON;
@@ -78,6 +82,19 @@ public class SqlOperator {
         if (type == Type.LOGICAL) {
             if ("AND".equals(opUpper)) return isTruthy(left) && isTruthy(right);
             if ("OR".equals(opUpper))  return isTruthy(left) || isTruthy(right);
+        }
+
+        if (type == Type.BITWISE) {
+            if (left == null || right == null) return null;
+            long l = (long) toDouble(left);
+            long r = (long) toDouble(right);
+            switch (op) {
+                case "|": return l | r;
+                case "&": return l & r;
+                case "^": return l ^ r;
+                case "<<": return l << r;
+                case ">>": return l >> r;
+            }
         }
 
         if (type == Type.ARITHMETIC) {
@@ -118,9 +135,26 @@ public class SqlOperator {
     // Unary evaluation: NOT val
     // ──────────────────────────────────────────────────────────
 
+    public static class BinaryVal {
+        public final String value;
+        public BinaryVal(String value) { this.value = value; }
+        @Override public String toString() { return value == null ? "" : value; }
+        @Override public boolean equals(Object o) {
+            if (this == o) return true;
+            if (o == null) return false;
+            return value != null && value.equals(o.toString());
+        }
+        @Override public int hashCode() { return value != null ? value.hashCode() : 0; }
+    }
+
     public static Object evaluateUnary(String op, Object val) {
         if (op == null) return null;
         if ("NOT".equalsIgnoreCase(op)) return !isTruthy(val);
+        if ("BINARY".equalsIgnoreCase(op)) return val != null ? new BinaryVal(val.toString()) : null;
+        if ("~".equals(op)) {
+            if (val == null) return null;
+            return ~(long) toDouble(val);
+        }
         if ("-".equals(op)) {
             if (val == null) return null;
             return -toDouble(val);
@@ -297,7 +331,9 @@ public class SqlOperator {
         } else {
             String lStr = lVal.toString();
             String rStr = rVal.toString();
-            int cmp = SqlCollation.compare(lStr, rStr, collation);
+            int cmp = (lVal instanceof BinaryVal || rVal instanceof BinaryVal)
+                    ? lStr.compareTo(rStr)
+                    : SqlCollation.compare(lStr, rStr, collation);
             switch (op) {
                 case "=":  return cmp == 0;
                 case "!=":

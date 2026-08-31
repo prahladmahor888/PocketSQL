@@ -12,6 +12,7 @@ import java.time.LocalTime;
 import java.time.format.DateTimeFormatter;
 import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
+import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
 import javax.crypto.Cipher;
@@ -520,6 +521,48 @@ public class SqlFunctions {
         return java.util.Collections.emptyList();
     }
 
+    public static boolean evaluateExists(String subquerySql, Map<String, Object> outerRow, DatabaseEngine engine) {
+        if (subquerySql == null || engine == null) return false;
+        String trimmed = subquerySql.trim();
+        if (trimmed.startsWith("(") && trimmed.endsWith(")")) {
+            trimmed = trimmed.substring(1, trimmed.length() - 1).trim();
+        }
+
+        if (outerRow != null && !outerRow.isEmpty()) {
+            List<Map.Entry<String, Object>> entries = new ArrayList<>(outerRow.entrySet());
+            entries.sort((e1, e2) -> Integer.compare(e2.getKey().length(), e1.getKey().length()));
+
+            for (Map.Entry<String, Object> entry : entries) {
+                String key = entry.getKey();
+                if (key == null || key.isEmpty()) continue;
+                // Outer reference substitution in correlated subqueries uses qualified table column names (e.g. u1.city)
+                if (!key.contains(".")) continue;
+                Object val = entry.getValue();
+
+                String pattern = "(?i)\\b" + java.util.regex.Pattern.quote(key) + "\\b";
+                java.util.regex.Pattern p = java.util.regex.Pattern.compile(pattern);
+                if (p.matcher(trimmed).find()) {
+                    String valStr;
+                    if (val == null) {
+                        valStr = "NULL";
+                    } else if (val instanceof Number || val instanceof Boolean) {
+                        valStr = val.toString();
+                    } else {
+                        valStr = "'" + val.toString().replace("'", "\\'") + "'";
+                    }
+                    trimmed = p.matcher(trimmed).replaceAll(java.util.regex.Matcher.quoteReplacement(valStr));
+                }
+            }
+        }
+
+        try {
+            QueryResult qres = engine.execute(trimmed);
+            return qres.success && qres.rows != null && !qres.rows.isEmpty();
+        } catch (Exception e) {
+            return false;
+        }
+    }
+
     /** @deprecated Use SqlOperator.isTruthy(val) instead */
     @Deprecated
     public static boolean isTruthy(Object val) {
@@ -691,6 +734,109 @@ public class SqlFunctions {
             for (int i = 0; i < count; i++) sb.append(str);
             return sb.toString();
         }
+        if ("QUOTE".equals(name)) {
+            if (argVals.isEmpty() || argVals.get(0) == null) return null;
+            String str = argVals.get(0).toString();
+            return "'" + str.replace("\\", "\\\\").replace("'", "\\'") + "'";
+        }
+        if ("HEX".equals(name)) {
+            if (argVals.isEmpty() || argVals.get(0) == null) return null;
+            Object arg = argVals.get(0);
+            if (arg instanceof Number) {
+                return Long.toHexString(((Number) arg).longValue()).toUpperCase();
+            }
+            String str = arg.toString();
+            try {
+                long val = Long.parseLong(str);
+                return Long.toHexString(val).toUpperCase();
+            } catch (NumberFormatException e) {
+                StringBuilder sb = new StringBuilder();
+                for (byte b : str.getBytes(StandardCharsets.UTF_8)) {
+                    sb.append(String.format("%02X", b));
+                }
+                return sb.toString();
+            }
+        }
+        if ("UNHEX".equals(name)) {
+            if (argVals.isEmpty() || argVals.get(0) == null) return null;
+            String hex = argVals.get(0).toString().trim();
+            if (hex.length() % 2 != 0) return null;
+            try {
+                byte[] bytes = fromHexString(hex);
+                return new String(bytes, StandardCharsets.UTF_8);
+            } catch (Exception e) {
+                return null;
+            }
+        }
+        if ("ASCII".equals(name)) {
+            if (argVals.isEmpty() || argVals.get(0) == null) return null;
+            String str = argVals.get(0).toString();
+            if (str.isEmpty()) return 0L;
+            return (long) str.charAt(0);
+        }
+        if ("CHAR".equals(name)) {
+            if (argVals.isEmpty()) return null;
+            StringBuilder sb = new StringBuilder();
+            for (Object arg : argVals) {
+                if (arg != null) {
+                    try {
+                        int code = ((Number) arg).intValue();
+                        sb.append((char) code);
+                    } catch (Exception e) {
+                        try {
+                            int code = Integer.parseInt(arg.toString());
+                            sb.append((char) code);
+                        } catch (Exception ignored) {}
+                    }
+                }
+            }
+            return sb.toString();
+        }
+        if ("FIELD".equals(name)) {
+            if (argVals.size() < 2 || argVals.get(0) == null) return 0L;
+            String target = argVals.get(0).toString();
+            for (int i = 1; i < argVals.size(); i++) {
+                Object arg = argVals.get(i);
+                if (arg != null && target.equalsIgnoreCase(arg.toString())) {
+                    return (long) i;
+                }
+            }
+            return 0L;
+        }
+        if ("FIND_IN_SET".equals(name)) {
+            if (argVals.size() < 2 || argVals.get(0) == null || argVals.get(1) == null) return 0L;
+            String target = argVals.get(0).toString().trim();
+            String listStr = argVals.get(1).toString();
+            String[] items = listStr.split(",");
+            for (int i = 0; i < items.length; i++) {
+                if (target.equalsIgnoreCase(items[i].trim())) {
+                    return (long) (i + 1);
+                }
+            }
+            return 0L;
+        }
+        if ("ELT".equals(name)) {
+            if (argVals.size() < 2 || argVals.get(0) == null) return null;
+            int n = ((Number) argVals.get(0)).intValue();
+            if (n >= 1 && n < argVals.size()) {
+                return argVals.get(n);
+            }
+            return null;
+        }
+        if ("MAKE_SET".equals(name)) {
+            if (argVals.isEmpty() || argVals.get(0) == null) return null;
+            long bits = ((Number) argVals.get(0)).longValue();
+            List<String> resultList = new ArrayList<>();
+            for (int i = 1; i < argVals.size(); i++) {
+                Object arg = argVals.get(i);
+                if (arg == null) continue;
+                long bitMask = 1L << (i - 1);
+                if ((bits & bitMask) != 0) {
+                    resultList.add(arg.toString());
+                }
+            }
+            return String.join(",", resultList);
+        }
 
         // Numeric functions
         if ("ABS".equals(name)) {
@@ -703,6 +849,20 @@ public class SqlFunctions {
             int decimals = argVals.size() > 1 && argVals.get(1) != null ? ((Number) argVals.get(1)).intValue() : 0;
             double factor = Math.pow(10, decimals);
             return Math.round(val * factor) / factor;
+        }
+        if ("TRUNCATE".equals(name)) {
+            if (argVals.size() < 2 || argVals.get(0) == null || argVals.get(1) == null) return null;
+            try {
+                java.math.BigDecimal bd = new java.math.BigDecimal(argVals.get(0).toString());
+                int decimals = ((Number) argVals.get(1)).intValue();
+                java.math.BigDecimal truncated = bd.setScale(decimals, java.math.RoundingMode.DOWN);
+                if (decimals <= 0) {
+                    return truncated.longValue();
+                }
+                return truncated.doubleValue();
+            } catch (Exception e) {
+                return null;
+            }
         }
         if ("CEIL".equals(name) || "CEILING".equals(name)) {
             if (argVals.isEmpty() || argVals.get(0) == null) return null;
@@ -770,6 +930,85 @@ public class SqlFunctions {
                 return Math.log(val) / Math.log(base);
             }
             return Math.log(val);
+        }
+        if ("LOG10".equals(name)) {
+            if (argVals.isEmpty() || argVals.get(0) == null) return null;
+            double val = parseDouble(argVals.get(0));
+            if (val <= 0) return null;
+            return Math.log10(val);
+        }
+        if ("LOG2".equals(name)) {
+            if (argVals.isEmpty() || argVals.get(0) == null) return null;
+            double val = parseDouble(argVals.get(0));
+            if (val <= 0) return null;
+            return Math.log(val) / Math.log(2.0);
+        }
+        if ("DEGREES".equals(name)) {
+            if (argVals.isEmpty() || argVals.get(0) == null) return null;
+            return Math.toDegrees(parseDouble(argVals.get(0)));
+        }
+        if ("RADIANS".equals(name)) {
+            if (argVals.isEmpty() || argVals.get(0) == null) return null;
+            return Math.toRadians(parseDouble(argVals.get(0)));
+        }
+        if ("SIN".equals(name)) {
+            if (argVals.isEmpty() || argVals.get(0) == null) return null;
+            return Math.sin(parseDouble(argVals.get(0)));
+        }
+        if ("COS".equals(name)) {
+            if (argVals.isEmpty() || argVals.get(0) == null) return null;
+            return Math.cos(parseDouble(argVals.get(0)));
+        }
+        if ("TAN".equals(name)) {
+            if (argVals.isEmpty() || argVals.get(0) == null) return null;
+            return Math.tan(parseDouble(argVals.get(0)));
+        }
+        if ("ASIN".equals(name)) {
+            if (argVals.isEmpty() || argVals.get(0) == null) return null;
+            double val = parseDouble(argVals.get(0));
+            if (val < -1.0 || val > 1.0) return null;
+            return Math.asin(val);
+        }
+        if ("ACOS".equals(name)) {
+            if (argVals.isEmpty() || argVals.get(0) == null) return null;
+            double val = parseDouble(argVals.get(0));
+            if (val < -1.0 || val > 1.0) return null;
+            return Math.acos(val);
+        }
+        if ("ATAN".equals(name)) {
+            if (argVals.isEmpty() || argVals.get(0) == null) return null;
+            if (argVals.size() > 1 && argVals.get(1) != null) {
+                return Math.atan2(parseDouble(argVals.get(0)), parseDouble(argVals.get(1)));
+            }
+            return Math.atan(parseDouble(argVals.get(0)));
+        }
+        if ("LEAST".equals(name)) {
+            if (argVals.isEmpty()) return null;
+            Object minVal = null;
+            for (Object arg : argVals) {
+                if (arg != null) {
+                    if (minVal == null) {
+                        minVal = arg;
+                    } else if (compare(arg, "<", minVal)) {
+                        minVal = arg;
+                    }
+                }
+            }
+            return minVal;
+        }
+        if ("GREATEST".equals(name)) {
+            if (argVals.isEmpty()) return null;
+            Object maxVal = null;
+            for (Object arg : argVals) {
+                if (arg != null) {
+                    if (maxVal == null) {
+                        maxVal = arg;
+                    } else if (compare(arg, ">", maxVal)) {
+                        maxVal = arg;
+                    }
+                }
+            }
+            return maxVal;
         }
 
         // Date & Time functions
@@ -955,6 +1194,95 @@ public class SqlFunctions {
             LocalDateTime dt = parseDateTime(argVals.get(0));
             if (dt == null) return null;
             return formatDateMySQL(dt, argVals.get(1).toString());
+        }
+        if ("WEEK".equals(name)) {
+            if (argVals.isEmpty() || argVals.get(0) == null) return null;
+            LocalDateTime dt = parseDateTime(argVals.get(0));
+            if (dt == null) return null;
+            java.time.temporal.WeekFields wf = java.time.temporal.WeekFields.of(java.util.Locale.getDefault());
+            return (long) dt.get(wf.weekOfWeekBasedYear());
+        }
+        if ("LAST_DAY".equals(name)) {
+            if (argVals.isEmpty() || argVals.get(0) == null) return null;
+            LocalDateTime dt = parseDateTime(argVals.get(0));
+            if (dt == null) return null;
+            return dt.toLocalDate().with(java.time.temporal.TemporalAdjusters.lastDayOfMonth()).toString();
+        }
+        if ("ADDDATE".equals(name) || "SUBDATE".equals(name)) {
+            if (argVals.size() < 2 || argVals.get(0) == null || argVals.get(1) == null) return null;
+            LocalDateTime dt = parseDateTime(argVals.get(0));
+            if (dt == null) return null;
+            Object arg1 = argVals.get(1);
+            String valStr = arg1.toString().trim();
+            boolean isSub = "SUBDATE".equals(name);
+            if (valStr.toUpperCase().startsWith("INTERVAL ")) {
+                List<Object> passArgs = new ArrayList<>();
+                passArgs.add(argVals.get(0));
+                passArgs.add(arg1);
+                return evaluateScalarFunction(isSub ? "DATE_SUB" : "DATE_ADD", passArgs, engine);
+            }
+            long days = 0;
+            try {
+                days = ((Number) arg1).longValue();
+            } catch (Exception e) {
+                try {
+                    days = Long.parseLong(arg1.toString());
+                } catch (Exception ignored) {}
+            }
+            if (isSub) days = -days;
+            dt = dt.plusDays(days);
+            String res = dt.format(DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss"));
+            if (res.endsWith(" 00:00:00")) {
+                return res.substring(0, 10);
+            }
+            return res;
+        }
+        if ("MAKEDATE".equals(name)) {
+            if (argVals.size() < 2 || argVals.get(0) == null || argVals.get(1) == null) return null;
+            int year = ((Number) argVals.get(0)).intValue();
+            int dayOfYear = ((Number) argVals.get(1)).intValue();
+            if (dayOfYear <= 0) return null;
+            try {
+                return java.time.LocalDate.ofYearDay(year, dayOfYear).toString();
+            } catch (Exception e) {
+                return null;
+            }
+        }
+        if ("MAKETIME".equals(name)) {
+            if (argVals.size() < 3 || argVals.get(0) == null || argVals.get(1) == null || argVals.get(2) == null) return null;
+            int h = ((Number) argVals.get(0)).intValue();
+            int m = ((Number) argVals.get(1)).intValue();
+            int s = ((Number) argVals.get(2)).intValue();
+            try {
+                return java.time.LocalTime.of(h, m, s).format(DateTimeFormatter.ofPattern("HH:mm:ss"));
+            } catch (Exception e) {
+                return null;
+            }
+        }
+        if ("STR_TO_DATE".equals(name)) {
+            if (argVals.size() < 2 || argVals.get(0) == null || argVals.get(1) == null) return null;
+            String dateStr = argVals.get(0).toString().trim();
+            String fmtStr = argVals.get(1).toString().trim();
+            return parseDateMySQL(dateStr, fmtStr);
+        }
+        if ("EXTRACT".equals(name)) {
+            if (argVals.size() < 2 || argVals.get(0) == null || argVals.get(1) == null) return null;
+            String unit = argVals.get(0).toString().toUpperCase().trim();
+            LocalDateTime dt = parseDateTime(argVals.get(1));
+            if (dt == null) return null;
+            switch (unit) {
+                case "YEAR": return (long) dt.getYear();
+                case "MONTH": return (long) dt.getMonthValue();
+                case "DAY": return (long) dt.getDayOfMonth();
+                case "HOUR": return (long) dt.getHour();
+                case "MINUTE": return (long) dt.getMinute();
+                case "SECOND": return (long) dt.getSecond();
+                case "WEEK": {
+                    java.time.temporal.WeekFields wf = java.time.temporal.WeekFields.of(java.util.Locale.getDefault());
+                    return (long) dt.get(wf.weekOfWeekBasedYear());
+                }
+                default: return (long) dt.getYear();
+            }
         }
         if ("FORMAT".equals(name)) {
             if (argVals.isEmpty() || argVals.get(0) == null) return null;
@@ -1142,46 +1470,193 @@ public class SqlFunctions {
                 return jsonStr;
             }
         }
+        if ("JSON_CONTAINS".equals(name)) {
+            if (argVals.size() < 2 || argVals.get(0) == null || argVals.get(1) == null) return null;
+            String targetStr = argVals.get(0).toString().trim();
+            String candidateStr = argVals.get(1).toString().trim();
+            if (argVals.size() >= 3 && argVals.get(2) != null) {
+                String path = argVals.get(2).toString().trim();
+                Object extracted = extractJsonPath(targetStr, path);
+                if (extracted == null) return 0L;
+                targetStr = extracted.toString().trim();
+            }
+            return jsonContains(targetStr, candidateStr) ? 1L : 0L;
+        }
+        if ("JSON_CONTAINS_PATH".equals(name)) {
+            if (argVals.size() < 3 || argVals.get(0) == null || argVals.get(1) == null) return null;
+            String targetStr = argVals.get(0).toString().trim();
+            String mode = argVals.get(1).toString().trim().toLowerCase();
+            boolean isAll = "all".equals(mode);
+            for (int i = 2; i < argVals.size(); i++) {
+                if (argVals.get(i) == null) return null;
+                String path = argVals.get(i).toString().trim();
+                boolean exists = extractJsonPath(targetStr, path) != null;
+                if (exists && !isAll) return 1L;
+                if (!exists && isAll) return 0L;
+            }
+            return isAll ? 1L : 0L;
+        }
+        if ("JSON_TYPE".equals(name)) {
+            if (argVals.isEmpty() || argVals.get(0) == null) return null;
+            String str = argVals.get(0).toString().trim();
+            if (str.startsWith("[")) return "ARRAY";
+            if (str.startsWith("{")) return "OBJECT";
+            if ("true".equalsIgnoreCase(str) || "false".equalsIgnoreCase(str)) return "BOOLEAN";
+            if ("null".equalsIgnoreCase(str)) return "NULL";
+            try { Double.parseDouble(str); return "INTEGER"; } catch (Exception e) {}
+            return "STRING";
+        }
+        if ("JSON_KEYS".equals(name)) {
+            if (argVals.isEmpty() || argVals.get(0) == null) return null;
+            String str = argVals.get(0).toString().trim();
+            if (argVals.size() >= 2 && argVals.get(1) != null) {
+                Object extracted = extractJsonPath(str, argVals.get(1).toString().trim());
+                if (extracted == null) return null;
+                str = extracted.toString().trim();
+            }
+            try {
+                JSONObject obj = new JSONObject(str);
+                JSONArray keysArr = new JSONArray();
+                Iterator<String> it = obj.keys();
+                while (it.hasNext()) keysArr.put(it.next());
+                return keysArr.toString();
+            } catch (Exception e) {
+                return null;
+            }
+        }
+        if ("JSON_LENGTH".equals(name)) {
+            if (argVals.isEmpty() || argVals.get(0) == null) return null;
+            String str = argVals.get(0).toString().trim();
+            if (argVals.size() >= 2 && argVals.get(1) != null) {
+                Object extracted = extractJsonPath(str, argVals.get(1).toString().trim());
+                if (extracted == null) return null;
+                str = extracted.toString().trim();
+            }
+            try {
+                if (str.startsWith("[")) return (long) new JSONArray(str).length();
+                if (str.startsWith("{")) return (long) new JSONObject(str).length();
+                return 1L;
+            } catch (Exception e) {
+                return null;
+            }
+        }
+        if ("JSON_VALID".equals(name)) {
+            if (argVals.isEmpty() || argVals.get(0) == null) return 0L;
+            String str = argVals.get(0).toString().trim();
+            try {
+                if (str.startsWith("[")) { new JSONArray(str); return 1L; }
+                if (str.startsWith("{")) { new JSONObject(str); return 1L; }
+                return 0L;
+            } catch (Exception e) {
+                return 0L;
+            }
+        }
+        if ("JSON_UNQUOTE".equals(name)) {
+            if (argVals.isEmpty() || argVals.get(0) == null) return null;
+            String str = argVals.get(0).toString().trim();
+            if (str.startsWith("\"") && str.endsWith("\"") && str.length() >= 2) {
+                return str.substring(1, str.length() - 1);
+            }
+            return str;
+        }
+        if ("JSON_QUOTE".equals(name)) {
+            if (argVals.isEmpty() || argVals.get(0) == null) return null;
+            return "\"" + argVals.get(0).toString() + "\"";
+        }
 
         // System functions
         if ("DATABASE".equals(name)) {
             return engine != null ? engine.getActiveDatabase() : null;
         }
-        if ("USER".equals(name) || "SYSTEM_USER".equals(name) || "SESSION_USER".equals(name)) {
-            if (engine == null) return SecurityHelper.getDefaultUser() + "@" + SecurityHelper.getDefaultHost();
-            String user = engine.getCurrentUser();
-            String host = engine.getCurrentHost();
-            if (user == null) user = SecurityHelper.getDefaultUser();
-            if (host == null) host = SecurityHelper.getDefaultHost();
-            return user + "@" + host;
+        if ("USER".equals(name) || "SYSTEM_USER".equals(name) || "SESSION_USER".equals(name) || "CURRENT_USER".equals(name)) {
+            try {
+                if (engine == null) return SecurityHelper.getDefaultUser() + "@" + SecurityHelper.getDefaultHost();
+                String user = engine.getCurrentUser();
+                String host = engine.getCurrentHost();
+                if (user == null) user = SecurityHelper.getDefaultUser();
+                if (host == null) host = SecurityHelper.getDefaultHost();
+                return user + "@" + host;
+            } catch (Exception e) {
+                return SecurityHelper.getDefaultUser() + "@" + SecurityHelper.getDefaultHost();
+            }
         }
         if ("VERSION".equals(name)) {
-            return "8.0.30";
+            try {
+                return com.mysql.pocketsql.BuildConfig.VERSION_NAME;
+            } catch (Throwable e) {
+                return "1.0.1";
+            }
         }
         if ("CONNECTION_ID".equals(name)) {
-            return 1L;
+            try {
+                return 1L;
+            } catch (Exception e) {
+                return 1L;
+            }
+        }
+        if ("CHARSET".equals(name)) {
+            try {
+                return "utf8mb4";
+            } catch (Exception e) {
+                return "utf8mb4";
+            }
+        }
+        if ("COLLATION".equals(name)) {
+            try {
+                return "utf8mb4_general_ci";
+            } catch (Exception e) {
+                return "utf8mb4_general_ci";
+            }
         }
 
         // Encryption functions
         if ("MD5".equals(name)) {
-            if (argVals.isEmpty() || argVals.get(0) == null) return null;
-            return md5(argVals.get(0).toString());
+            try {
+                if (argVals.isEmpty() || argVals.get(0) == null) return null;
+                return md5(argVals.get(0).toString());
+            } catch (Exception e) {
+                return null;
+            }
         }
         if ("SHA1".equals(name) || "SHA".equals(name)) {
-            if (argVals.isEmpty() || argVals.get(0) == null) return null;
-            return sha1(argVals.get(0).toString());
+            try {
+                if (argVals.isEmpty() || argVals.get(0) == null) return null;
+                return sha1(argVals.get(0).toString());
+            } catch (Exception e) {
+                return null;
+            }
         }
         if ("SHA2".equals(name)) {
-            if (argVals.size() < 2 || argVals.get(0) == null || argVals.get(1) == null) return null;
-            return sha2(argVals.get(0).toString(), ((Number) argVals.get(1)).intValue());
+            try {
+                if (argVals.size() < 2 || argVals.get(0) == null || argVals.get(1) == null) return null;
+                int len = 256;
+                try {
+                    if (argVals.get(1) instanceof Number) {
+                        len = ((Number) argVals.get(1)).intValue();
+                    } else {
+                        len = Integer.parseInt(argVals.get(1).toString().trim());
+                    }
+                } catch (Exception ignored) {}
+                return sha2(argVals.get(0).toString(), len);
+            } catch (Exception e) {
+                return null;
+            }
         }
         if ("AES_ENCRYPT".equals(name)) {
-            if (argVals.size() < 2 || argVals.get(0) == null || argVals.get(1) == null) return null;
-            return aesEncrypt(argVals.get(0).toString(), argVals.get(1).toString());
+            try {
+                if (argVals.size() < 2 || argVals.get(0) == null || argVals.get(1) == null) return null;
+                return aesEncrypt(argVals.get(0).toString(), argVals.get(1).toString());
+            } catch (Exception e) {
+                return null;
+            }
         }
         if ("AES_DECRYPT".equals(name)) {
-            if (argVals.size() < 2 || argVals.get(0) == null || argVals.get(1) == null) return null;
-            return aesDecrypt(argVals.get(0).toString(), argVals.get(1).toString());
+            try {
+                if (argVals.size() < 2 || argVals.get(0) == null || argVals.get(1) == null) return null;
+                return aesDecrypt(argVals.get(0).toString(), argVals.get(1).toString());
+            } catch (Exception e) {
+                return null;
+            }
         }
 
         throw new RuntimeException("FUNCTION " + name + " does not exist");
@@ -1194,6 +1669,11 @@ public class SqlFunctions {
         try {
             if (s.length() == 10) {
                 return LocalDate.parse(s).atStartOfDay();
+            }
+            if (s.contains(":") && !s.contains("-")) {
+                if (s.length() == 5) s = s + ":00";
+                LocalTime lt = LocalTime.parse(s);
+                return LocalDate.now().atTime(lt);
             }
             if (s.length() > 19) {
                 s = s.substring(0, 19);
@@ -1279,6 +1759,38 @@ public class SqlFunctions {
             }
         }
         return sb.toString();
+    }
+
+    public static String parseDateMySQL(String dateStr, String fmtStr) {
+        try {
+            String javaFmt = fmtStr
+                .replace("%Y", "yyyy")
+                .replace("%y", "yy")
+                .replace("%m", "MM")
+                .replace("%c", "M")
+                .replace("%d", "dd")
+                .replace("%e", "d")
+                .replace("%H", "HH")
+                .replace("%h", "hh")
+                .replace("%I", "hh")
+                .replace("%i", "mm")
+                .replace("%s", "ss")
+                .replace("%S", "ss")
+                .replace("%M", "MMMM")
+                .replace("%b", "MMM")
+                .replace("%W", "EEEE")
+                .replace("%a", "EEE");
+            DateTimeFormatter dtf = DateTimeFormatter.ofPattern(javaFmt, java.util.Locale.ENGLISH);
+            try {
+                LocalDateTime ldt = LocalDateTime.parse(dateStr, dtf);
+                return ldt.format(DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss"));
+            } catch (Exception e1) {
+                LocalDate ld = LocalDate.parse(dateStr, dtf);
+                return ld.toString();
+            }
+        } catch (Exception e) {
+            return null;
+        }
     }
 
     private static Object extractJsonPath(String jsonStr, String path) {
@@ -1387,6 +1899,70 @@ public class SqlFunctions {
         } catch (Exception e) {
             return root;
         }
+    }
+
+    private static boolean jsonContains(String targetStr, String candidateStr) {
+        if (targetStr == null || candidateStr == null) return false;
+        targetStr = targetStr.trim();
+        candidateStr = candidateStr.trim();
+        if (targetStr.equalsIgnoreCase(candidateStr)) return true;
+
+        String unquotedCandidate = candidateStr;
+        if (candidateStr.startsWith("\"") && candidateStr.endsWith("\"") && candidateStr.length() >= 2) {
+            unquotedCandidate = candidateStr.substring(1, candidateStr.length() - 1);
+        }
+
+        try {
+            if (targetStr.startsWith("[")) {
+                JSONArray arr = new JSONArray(targetStr);
+                for (int i = 0; i < arr.length(); i++) {
+                    Object elem = arr.opt(i);
+                    if (elem != null) {
+                        String elemStr = elem.toString().trim();
+                        if (elemStr.equals(candidateStr) || elemStr.equals(unquotedCandidate)) {
+                            return true;
+                        }
+                        if (elemStr.startsWith("{") || elemStr.startsWith("[")) {
+                            if (jsonContains(elemStr, candidateStr)) return true;
+                        }
+                    }
+                }
+                return false;
+            }
+            if (targetStr.startsWith("{")) {
+                if (candidateStr.startsWith("{")) {
+                    JSONObject targetObj = new JSONObject(targetStr);
+                    JSONObject candidateObj = new JSONObject(candidateStr);
+                    Iterator<String> keys = candidateObj.keys();
+                    while (keys.hasNext()) {
+                        String key = keys.next();
+                        if (!targetObj.has(key)) return false;
+                        String tVal = targetObj.opt(key) != null ? targetObj.opt(key).toString() : "";
+                        String cVal = candidateObj.opt(key) != null ? candidateObj.opt(key).toString() : "";
+                        if (!jsonContains(tVal, cVal)) return false;
+                    }
+                    return true;
+                } else {
+                    JSONObject targetObj = new JSONObject(targetStr);
+                    Iterator<String> keys = targetObj.keys();
+                    while (keys.hasNext()) {
+                        String key = keys.next();
+                        Object val = targetObj.opt(key);
+                        if (val != null) {
+                            String valStr = val.toString().trim();
+                            if (valStr.equals(candidateStr) || valStr.equals(unquotedCandidate)) return true;
+                            if (valStr.startsWith("{") || valStr.startsWith("[")) {
+                                if (jsonContains(valStr, candidateStr)) return true;
+                            }
+                        }
+                    }
+                    return false;
+                }
+            }
+        } catch (Exception e) {
+            // fallback plain string match
+        }
+        return targetStr.contains(unquotedCandidate) || targetStr.contains(candidateStr);
     }
 
     private static String md5(String str) {
@@ -1551,10 +2127,34 @@ public class SqlFunctions {
         }
 
         private Expression parseExpression() {
+            return parseBitwiseOr();
+        }
+
+        private Expression parseBitwiseOr() {
+            Expression left = parseBitwiseXor();
+            while (matchSymbol("|") || matchKeyword("OR")) {
+                SqlToken opToken = tokens.get(pos - 1);
+                String op = opToken.value.toUpperCase();
+                Expression right = parseBitwiseXor();
+                left = new BinaryOpExpression(left, op, right);
+            }
+            return left;
+        }
+
+        private Expression parseBitwiseXor() {
+            Expression left = parseBitwiseAnd();
+            while (matchSymbol("^")) {
+                Expression right = parseBitwiseAnd();
+                left = new BinaryOpExpression(left, "^", right);
+            }
+            return left;
+        }
+
+        private Expression parseBitwiseAnd() {
             Expression left = parseAnd();
-            while (matchKeyword("OR")) {
+            while (matchSymbol("&")) {
                 Expression right = parseAnd();
-                left = new BinaryOpExpression(left, "OR", right);
+                left = new BinaryOpExpression(left, "&", right);
             }
             return left;
         }
@@ -1569,18 +2169,30 @@ public class SqlFunctions {
         }
 
         private Expression parseComparison() {
-            Expression left = parseTerm();
+            Expression left = parseShift();
             SqlToken op = peek();
             if (op.type == SqlToken.Type.SYMBOL && 
                 ("=".equals(op.value) || "!=".equals(op.value) || "<>".equals(op.value) || 
                  ">".equals(op.value) || "<".equals(op.value) || ">=".equals(op.value) || "<=".equals(op.value))) {
                 consume();
-                Expression right = parseTerm();
+                Expression right = parseShift();
                 left = new BinaryOpExpression(left, op.value, right);
             } else if (op.type == SqlToken.Type.KEYWORD && "LIKE".equalsIgnoreCase(op.value)) {
                 consume();
-                Expression right = parseTerm();
+                Expression right = parseShift();
                 left = new BinaryOpExpression(left, "LIKE", right);
+            }
+            return left;
+        }
+
+        private Expression parseShift() {
+            Expression left = parseTerm();
+            SqlToken op = peek();
+            while (op.type == SqlToken.Type.SYMBOL && ("<<".equals(op.value) || ">>".equals(op.value))) {
+                consume();
+                Expression right = parseTerm();
+                left = new BinaryOpExpression(left, op.value, right);
+                op = peek();
             }
             return left;
         }
@@ -1615,7 +2227,11 @@ public class SqlFunctions {
                 consume();
                 return new UnaryOpExpression("NOT", parseUnary());
             }
-            if (t.type == SqlToken.Type.SYMBOL && ("-".equals(t.value) || "+".equals(t.value))) {
+            if (t.type == SqlToken.Type.KEYWORD && "BINARY".equalsIgnoreCase(t.value)) {
+                consume();
+                return new UnaryOpExpression("BINARY", parseUnary());
+            }
+            if (t.type == SqlToken.Type.SYMBOL && ("-".equals(t.value) || "+".equals(t.value) || "~".equals(t.value))) {
                 consume();
                 return new UnaryOpExpression(t.value, parseUnary());
             }
@@ -1697,8 +2313,31 @@ public class SqlFunctions {
                 }
                 if (matchSymbol("(")) {
                     List<Expression> args = new ArrayList<>();
+                    if ("EXTRACT".equalsIgnoreCase(name)) {
+                        SqlToken unitTok = consume();
+                        if (matchKeyword("FROM")) {
+                            Expression dateExpr = parseExpression();
+                            args.add(new LiteralExpression(unitTok.value));
+                            args.add(dateExpr);
+                            matchSymbol(")");
+                            return new FunctionExpression(name, args);
+                        }
+                    }
                     if (!matchSymbol(")")) {
-                        if (matchSymbol("*")) {
+                        if ("CAST".equalsIgnoreCase(name)) {
+                            Expression castExpr = parseExpression();
+                            args.add(castExpr);
+                            if (matchKeyword("AS")) {
+                                SqlToken typeToken = consume();
+                                if (matchSymbol("(")) {
+                                    SqlToken lenToken = consume();
+                                    matchSymbol(")");
+                                    args.add(new LiteralExpression(typeToken.value + "(" + lenToken.value + ")"));
+                                } else {
+                                    args.add(new LiteralExpression(typeToken.value));
+                                }
+                            }
+                        } else if (matchSymbol("*")) {
                             args.add(new LiteralExpression("*"));
                         } else {
                             do {
@@ -1706,7 +2345,16 @@ public class SqlFunctions {
                                     Expression amount = parseExpression();
                                     SqlToken unitToken = consume();
                                     args.add(new LiteralExpression("INTERVAL " + amount.toString() + " " + unitToken.value));
-                                } else if (matchKeyword("AS")) {
+                                } else if (matchKeyword("AS") || matchKeyword("USING")) {
+                                    SqlToken typeToken = consume();
+                                    if (matchSymbol("(")) {
+                                        SqlToken lenToken = consume();
+                                        matchSymbol(")");
+                                        args.add(new LiteralExpression(typeToken.value + "(" + lenToken.value + ")"));
+                                    } else {
+                                        args.add(new LiteralExpression(typeToken.value));
+                                    }
+                                } else if (("CONVERT".equalsIgnoreCase(name) || "CAST".equalsIgnoreCase(name)) && args.size() == 1 && (peek().type == SqlToken.Type.KEYWORD || peek().type == SqlToken.Type.IDENTIFIER)) {
                                     SqlToken typeToken = consume();
                                     if (matchSymbol("(")) {
                                         SqlToken lenToken = consume();
@@ -1777,12 +2425,16 @@ public class SqlFunctions {
                     }
                     return new FunctionExpression(name, args);
                 }
+                if ("CURRENT_USER".equalsIgnoreCase(name) || "CURRENT_DATE".equalsIgnoreCase(name) || "CURRENT_TIME".equalsIgnoreCase(name) || "CURRENT_TIMESTAMP".equalsIgnoreCase(name) || "LOCALTIME".equalsIgnoreCase(name) || "LOCALTIMESTAMP".equalsIgnoreCase(name)) {
+                    return new FunctionExpression(name, new ArrayList<>());
+                }
                 return new ColumnExpression(name);
             }
             throw new RuntimeException("Unexpected token: " + t);
         }
 
         private Expression parseCaseExpression() {
+            consume(); // CASE
             Expression caseExpr = null;
             if (!peek().value.equalsIgnoreCase("WHEN")) {
                 caseExpr = parseExpression();

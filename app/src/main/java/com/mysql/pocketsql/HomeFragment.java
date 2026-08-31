@@ -261,12 +261,67 @@ public class HomeFragment extends Fragment {
         }
     }
 
+    public static class PromptLeadingMarginSpan implements android.text.style.LeadingMarginSpan.LeadingMarginSpan2 {
+        private final int margin;
+
+        public PromptLeadingMarginSpan(int margin) {
+            this.margin = margin;
+        }
+
+        @Override
+        public int getLeadingMargin(boolean first) {
+            return first ? margin : 0;
+        }
+
+        @Override
+        public void drawLeadingMargin(android.graphics.Canvas c, android.graphics.Paint p, int x, int dir, int top, int baseline, int bottom, CharSequence text, int start, int end, boolean first, android.text.Layout layout) {
+        }
+
+        @Override
+        public int getLeadingMarginLineCount() {
+            return 1;
+        }
+    }
+
+    private boolean isApplyingPromptMargin = false;
+
+    private void applyPromptMargin() {
+        applyPromptMargin(null);
+    }
+
+    private void applyPromptMargin(Editable editable) {
+        if (isApplyingPromptMargin || etCommandInput == null || tvTerminalPrompt == null) return;
+        if (editable == null) editable = etCommandInput.getText();
+        if (editable == null) return;
+
+        isApplyingPromptMargin = true;
+        try {
+            int promptWidth = tvTerminalPrompt.getWidth();
+            if (promptWidth <= 0) {
+                tvTerminalPrompt.measure(View.MeasureSpec.UNSPECIFIED, View.MeasureSpec.UNSPECIFIED);
+                promptWidth = tvTerminalPrompt.getMeasuredWidth();
+            }
+
+            PromptLeadingMarginSpan[] spans = editable.getSpans(0, editable.length(), PromptLeadingMarginSpan.class);
+            for (PromptLeadingMarginSpan span : spans) {
+                editable.removeSpan(span);
+            }
+
+            if (promptWidth > 0) {
+                editable.setSpan(new PromptLeadingMarginSpan(promptWidth), 0, editable.length(), android.text.Spannable.SPAN_INCLUSIVE_INCLUSIVE);
+            }
+        } finally {
+            isApplyingPromptMargin = false;
+        }
+    }
+
     private void refreshTerminalPrompt() {
         if (loginState != LOGIN_STATE_AUTHENTICATED) {
             return;
         }
         if (multiLineBuffer.length() > 0) {
             tvTerminalPrompt.setText("    -> ");
+            tvTerminalPrompt.post(this::applyPromptMargin);
             return;
         }
         String prompt = settings.getPromptString();
@@ -278,6 +333,7 @@ public class HomeFragment extends Fragment {
             String base = prompt.trim(); // e.g. "mysql>"
             tvTerminalPrompt.setText(base.replace(">", " [" + active + ">") + " ");
         }
+        tvTerminalPrompt.post(this::applyPromptMargin);
     }
 
     private void setTerminalInputType(int inputType, boolean isPassword) {
@@ -285,10 +341,14 @@ public class HomeFragment extends Fragment {
         etCommandInput.setFocusable(true);
         etCommandInput.setFocusableInTouchMode(true);
         etCommandInput.setEnabled(true);
-        if (!isPassword && inputType == android.text.InputType.TYPE_CLASS_TEXT) {
-            inputType = android.text.InputType.TYPE_CLASS_TEXT | android.text.InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS;
+        if (!isPassword) {
+            inputType |= android.text.InputType.TYPE_TEXT_FLAG_MULTI_LINE | android.text.InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS;
         }
         etCommandInput.setInputType(inputType);
+        if (!isPassword) {
+            etCommandInput.setSingleLine(false);
+            etCommandInput.setHorizontallyScrolling(false);
+        }
         if (getContext() != null && settings != null) {
             etCommandInput.setTypeface(settings.getTypeface(requireContext()));
         }
@@ -999,6 +1059,10 @@ public class HomeFragment extends Fragment {
             return false; // Allow Android native selection handles directly on tvTerminalHistory
         });
 
+        tvTerminalPrompt.addOnLayoutChangeListener((v, left, top, right, bottom, oldLeft, oldTop, oldRight, oldBottom) -> {
+            applyPromptMargin();
+        });
+
         // Keep input field scrolled into view above the keyboard on size/layout updates
         layoutTerminalContainer.addOnLayoutChangeListener((v, left, top, right, bottom, oldLeft, oldTop, oldRight, oldBottom) -> {
             scrollContainer.post(() -> scrollContainer.fullScroll(View.FOCUS_DOWN));
@@ -1555,7 +1619,9 @@ public class HomeFragment extends Fragment {
                 updateSuggestions(s.toString(), etCommandInput.getSelectionStart());
             }
             @Override
-            public void afterTextChanged(android.text.Editable s) {}
+            public void afterTextChanged(android.text.Editable s) {
+                applyPromptMargin(s);
+            }
         });
     }
 

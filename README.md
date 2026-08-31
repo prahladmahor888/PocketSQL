@@ -5,6 +5,8 @@
   <img src="https://img.shields.io/badge/Android-3DDC84?style=for-the-badge&logo=android&logoColor=white" alt="Android" />
   <img src="https://img.shields.io/badge/API_Server-Active-brightgreen?style=for-the-badge&logo=serverless&logoColor=white" alt="API Server" />
   <img src="https://img.shields.io/badge/Java-ED8B00?style=for-the-badge&logo=openjdk&logoColor=white" alt="Java" />
+  <img src="https://img.shields.io/badge/Made_in-India-FF9933?style=for-the-badge" alt="Made in India" />
+  <img src="https://flagcdn.com/w40/in.png" width="28" height="20" alt="India Flag" style="vertical-align: middle;" />
 </p>
 
 PocketSQL is a high-performance Android application running a **custom-built SQL Database Engine** locally on your mobile device. It features an interactive mobile terminal emulator with autocomplete, templates, and built-in help. Additionally, it launches an embedded **HTTP API Server** as a persistent background service, allowing external applications (web app, desktop app, or script) to connect securely and execute database queries remotely.
@@ -14,6 +16,7 @@ PocketSQL is a high-performance Android application running a **custom-built SQL
 ## 🗺️ Table of Contents
 - [⚙️ Architecture & How It Works](#%EF%B8%8F-architecture--how-it-works)
 - [✨ Core Features](#-core-features)
+- [📸 Application Screenshots](#-application-screenshots)
 - [📡 Embedded HTTP API Server & Background Service](#-embedded-http-api-server--background-service)
   - [Port Fallback Scan (`8080` - `8099`)](#port-fallback-scan-8080---8099)
   - [Remote Network Connections](#remote-network-connections)
@@ -23,6 +26,7 @@ PocketSQL is a high-performance Android application running a **custom-built SQL
   - [Quick Integration Snippets](#quick-integration-snippets)
 - [📋 HTTP API Reference](#-http-api-reference)
 - [🛠️ Build & Installation Guide](#%EF%B8%8F-build--installation-guide)
+- [👨‍💻 Developer & Contributors](#-developer--contributors)
 
 ---
 
@@ -61,6 +65,17 @@ PocketSQL operates by combining a custom SQL parsing pipeline, a JSON-based sche
 * **SQL Templates**: A dropdown toolbar offering quick-access boilerplate code for database administration, alter tables, transaction boundaries, and built-in SQL functions.
 * **Output Select & Copy**: A dialog to highlight and select terminal history lines natively, supporting Copy All and custom range copying.
 * **Interactive Help System**: Executing `HELP;` returns a table listing support indexes, and `HELP <keyword>;` describes keyword syntax with usage examples.
+
+---
+
+## 📸 Application Screenshots
+
+<p align="center">
+  <img src="docs/screenshots/terminal_welcome.png" width="220" alt="Terminal Console" />
+  <img src="docs/screenshots/terminal_select.png" width="220" alt="Select Query Result" />
+  <img src="docs/screenshots/sql_templates.png" width="220" alt="SQL Templates" />
+  <img src="docs/screenshots/api_keys_server.png" width="220" alt="API Server & Keys" />
+</p>
 
 ---
 
@@ -311,3 +326,30 @@ To compile and package the Android application from source code:
    ```powershell
    ./gradlew installDebug
    ```
+
+---
+
+## 👨‍💻 Developer & Contributors
+
+<p align="center">
+  <a href="https://github.com/prahladmahor888">
+    <img src="https://github.com/prahladmahor888.png?size=140" width="120" height="120" style="border-radius: 50%;" alt="Prahlad Mahor" />
+  </a>
+  <br />
+  <h3>Prahlad Mahor</h3>
+  <p>Lead Developer & Creator of PocketSQL Database Engine</p>
+  <p>
+    <a href="https://github.com/prahladmahor888">
+      <img src="https://img.shields.io/badge/GitHub-prahladmahor888-181717?style=for-the-badge&logo=github" alt="GitHub Profile" />
+    </a>
+    <a href="https://github.com/prahladmahor888/PocketSQL/graphs/contributors">
+      <img src="https://img.shields.io/github/contributors/prahladmahor888/PocketSQL?style=for-the-badge&color=007ACC" alt="Contributors" />
+    </a>
+    <img src="https://img.shields.io/badge/Made_in-India-FF9933?style=for-the-badge" alt="Made in India" />
+    <img src="https://flagcdn.com/w40/in.png" width="28" height="20" alt="India Flag" style="vertical-align: middle;" />
+  </p>
+</p>
+
+### <img src="https://flagcdn.com/w40/in.png" width="24" height="17" alt="India Flag" style="vertical-align: middle;" /> Developed in India
+PocketSQL is proudly designed, engineered, and maintained in **India** <img src="https://flagcdn.com/w40/in.png" width="22" height="15" alt="India Flag" style="vertical-align: middle;" /> by **[Prahlad Mahor](https://github.com/prahladmahor888)**.
+

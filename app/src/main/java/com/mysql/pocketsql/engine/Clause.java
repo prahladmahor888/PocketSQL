@@ -105,6 +105,16 @@ public class Clause {
                 }
             }
 
+            // Handle EXISTS and NOT EXISTS
+            if ("EXISTS".equalsIgnoreCase(operator)) {
+                String subSql = value != null ? value.toString() : "";
+                return SqlFunctions.evaluateExists(subSql, row, engine);
+            }
+            if ("NOT EXISTS".equalsIgnoreCase(operator)) {
+                String subSql = value != null ? value.toString() : "";
+                return !SqlFunctions.evaluateExists(subSql, row, engine);
+            }
+
             // Handle IS NULL / IS NOT NULL
             if ("IS NULL".equals(operator)) {
                 return rowVal == null;
@@ -188,15 +198,26 @@ public class Clause {
     public static class GroupBy {
         public final String column;
         public final List<String> columns;
+        public final boolean withRollup;
 
         public GroupBy(String column) {
+            this(column, false);
+        }
+
+        public GroupBy(String column, boolean withRollup) {
             this.column = column;
             this.columns = java.util.Collections.singletonList(column);
+            this.withRollup = withRollup;
         }
 
         public GroupBy(List<String> columns) {
+            this(columns, false);
+        }
+
+        public GroupBy(List<String> columns, boolean withRollup) {
             this.columns = columns;
             this.column = columns != null && !columns.isEmpty() ? columns.get(0) : "";
+            this.withRollup = withRollup;
         }
     }
 
