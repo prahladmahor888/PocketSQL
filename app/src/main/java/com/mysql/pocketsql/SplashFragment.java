@@ -17,17 +17,18 @@ public class SplashFragment extends Fragment {
     private final Runnable navigateRunnable = new Runnable() {
         @Override
         public void run() {
-            if (isAdded()) {
+            if (isAdded() && getActivity() != null) {
                 if (com.mysql.pocketsql.engine.SqlApiHelper.isDefaultDbReady()) {
                     requireActivity().getSupportFragmentManager()
                             .beginTransaction()
                             .replace(R.id.main_container, new HomeFragment())
-                            .commit();
+                            .commitAllowingStateLoss();
                 } else {
-                    handler.postDelayed(this, 200);
+                    handler.postDelayed(this, 16);
                 }
             }
         }
+
     };
 
     @Nullable

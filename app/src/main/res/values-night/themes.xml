@@ -1,7 +1,16 @@
 <resources xmlns:tools="http://schemas.android.com/tools">
     <!-- Base application theme. -->
     <style name="Base.Theme.PocketSQL" parent="Theme.Material3.DayNight.NoActionBar">
-        <!-- Customize your dark theme here. -->
-        <!-- <item name="colorPrimary">@color/my_dark_primary</item> -->
+        <!-- Instant Solid Navy Window Background (#020A1F) without logo preview -->
+        <item name="android:windowBackground">@color/splash_bg_color</item>
+        <item name="android:colorBackground">@color/splash_bg_color</item>
+        <item name="android:windowIsTranslucent">false</item>
+        
+        <!-- Android 12+ (API 31+) System Splash Screen API override (Transparent icon) -->
+        <item name="android:windowSplashScreenBackground" tools:targetApi="31">@color/splash_bg_color</item>
+        <item name="android:windowSplashScreenAnimatedIcon" tools:targetApi="31">@android:color/transparent</item>
     </style>
+
+
+    <style name="Theme.PocketSQL" parent="Base.Theme.PocketSQL" />
 </resources>

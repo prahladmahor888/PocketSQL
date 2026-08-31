@@ -58,10 +58,11 @@ public class SqlApiServer {
         }
 
         isRunning = true;
-        threadPool = Executors.newCachedThreadPool();
-        serverThread = new Thread(this::runServerLoop);
+        threadPool = SqlThreadScheduler.createApiServerThreadPool();
+        serverThread = new Thread(this::runServerLoop, "PocketSQL-ApiServerLoop");
         serverThread.start();
     }
+
 
     public synchronized void stop() {
         bindErrorMessage = null;
@@ -201,6 +202,19 @@ public class SqlApiServer {
                 return;
             }
 
+            String allowedDb = apiKeyManager.getKeyDatabase(token);
+            if (!"*".equals(allowedDb)) {
+                if (db != null && !db.trim().isEmpty() && !db.trim().equalsIgnoreCase(allowedDb)) {
+                    sendResponse(os, 403, "Forbidden", "{\"success\":false,\"message\":\"Forbidden: API Key is restricted to database '" + allowedDb + "'.\"}");
+                    return;
+                }
+                db = allowedDb;
+                if (sql.trim().toLowerCase().startsWith("use ")) {
+                    sendResponse(os, 403, "Forbidden", "{\"success\":false,\"message\":\"Forbidden: API Key is restricted to database '" + allowedDb + "'. Cannot switch database.\"}");
+                    return;
+                }
+            }
+
             try {
                 QueryResult result;
                 synchronized (engine) {
@@ -227,6 +241,7 @@ public class SqlApiServer {
                         }
                     }
                 }
+
 
                 JSONObject resObj = toJSON(result);
                 sendResponse(os, 200, "OK", resObj.toString());

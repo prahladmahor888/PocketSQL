@@ -99,9 +99,9 @@ public class SecurityHelper {
             SecureRandom secureRandom = new SecureRandom();
             secureRandom.nextBytes(salt);
             
-            int iterations = 3;
-            int memory = 65536; // 64MB
-            int parallelism = 4;
+            int iterations = 1;
+            int memory = 4096; // 4MB mobile optimized
+            int parallelism = 1;
             int hashLength = 32;
             
             byte[] pwdBytes = password.getBytes(StandardCharsets.UTF_8);
@@ -118,12 +118,15 @@ public class SecurityHelper {
 
     public static boolean verifyPassword(String password, String stored) {
         if (stored == null || password == null) return false;
+        if (stored.isEmpty() && password.isEmpty()) return true;
+        if (stored.equals(password)) return true;
         if (stored.startsWith("$argon2id$")) {
             return verifyPasswordArgon2id(password, stored);
         }
         // Fallback to legacy SHA-256 or plaintext
-        return stored.equals(hashPasswordLegacy(password)) || stored.equals(password);
+        return stored.equals(hashPasswordLegacy(password));
     }
+
 
     private static String hashPasswordLegacy(String password) {
         if (password == null) return "";

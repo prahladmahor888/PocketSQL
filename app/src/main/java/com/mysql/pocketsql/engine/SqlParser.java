@@ -971,14 +971,25 @@ public class SqlParser {
 
     private Command parseHelp() throws SqlSyntaxException {
         consume(); // HELP
-        SqlToken t = peek();
-        String topic = null;
-        if (t.type == SqlToken.Type.IDENTIFIER || t.type == SqlToken.Type.KEYWORD || t.type == SqlToken.Type.STRING) {
-            topic = t.value;
-            consume();
+        StringBuilder sb = new StringBuilder();
+        while (peek().type != SqlToken.Type.EOF && !(peek().type == SqlToken.Type.SYMBOL && ";".equals(peek().value))) {
+            SqlToken t = consume();
+            if (sb.length() > 0) {
+                if (t.type == SqlToken.Type.SYMBOL && ("(".equals(t.value) || ")".equals(t.value))) {
+                    sb.append(t.value);
+                } else if (lastCharIs(sb, '(')) {
+                    sb.append(t.value);
+                } else {
+                    sb.append(" ").append(t.value);
+                }
+            } else {
+                sb.append(t.value);
+            }
         }
+        String topic = sb.length() > 0 ? sb.toString().trim() : null;
         return new Command.Help(topic);
     }
+
 
     private Command parseExport() throws SqlSyntaxException {
         consume(); // EXPORT

@@ -15,8 +15,17 @@ public class SqlApiHelper {
     private static volatile boolean isDefaultDbReady = false;
 
     public static boolean isDefaultDbReady() {
-        return isDefaultDbReady;
+        if (isDefaultDbReady) return true;
+        if (engine != null) {
+            try {
+                if (engine.getStorageEngine() != null && engine.getStorageEngine().databaseExists("ecommerce")) {
+                    return true;
+                }
+            } catch (Exception ignored) {}
+        }
+        return false;
     }
+
 
     public static Context getContext() {
         return context;
@@ -32,8 +41,10 @@ public class SqlApiHelper {
                 pocketsqlDir.mkdirs();
             }
 
-            // Ensure any existing database/JSON files inside internal storage are encrypted
-            encryptExistingPlaintextFiles(pocketsqlDir);
+            // Ensure any existing database/JSON files inside internal storage are encrypted (in background IO thread)
+            SqlThreadScheduler.runBackgroundTask(() -> encryptExistingPlaintextFiles(pocketsqlDir));
+
+
 
             engine = new DatabaseEngine(pocketsqlDir);
             apiKeyManager = new SqlApiKeyManager(pocketsqlDir);
@@ -56,16 +67,14 @@ public class SqlApiHelper {
         for (int i = 0; i < defaultDatabases.length; i++) {
             try {
                 if (engine.getStorageEngine().databaseExists(defaultDatabases[i])) {
-                    org.json.JSONObject schema = engine.getStorageEngine().readSchema(defaultDatabases[i]);
-                    if (schema.has(checkTables[i])) {
-                        continue; // Already loaded
-                    }
+                    continue; // Already loaded on disk
                 }
             } catch (Exception e) {
                 SqlLog.printStackTrace(e);
             }
             toLoad.add(defaultDatabases[i]);
         }
+
 
         if (toLoad.isEmpty()) {
             try {
@@ -79,9 +88,10 @@ public class SqlApiHelper {
 
         isDefaultDbReady = false;
 
-        new Thread(new Runnable() {
+        SqlThreadScheduler.runDatabaseInitTask(new Runnable() {
             @Override
             public void run() {
+
                 final String prevUser = engine.getCurrentUser();
                 final String prevHost = engine.getCurrentHost();
                 engine.setCurrentUser(SecurityHelper.getDefaultUser(), SecurityHelper.getDefaultHost());
@@ -89,6 +99,12 @@ public class SqlApiHelper {
                 try {
                     engine.setDeferWrite(true);
                     engine.setConstraintsEnabled(false);
+
+                    // Ensure default active database ("ecommerce") is loaded first for instant app launch
+                    if (toLoad.contains("ecommerce")) {
+                        toLoad.remove("ecommerce");
+                        toLoad.add(0, "ecommerce");
+                    }
 
                     for (String dbName : toLoad) {
                         java.io.InputStream schemaStream = null;
@@ -108,6 +124,16 @@ public class SqlApiHelper {
                                 try { seedStream.close(); } catch (Exception ignored) {}
                             }
                         }
+
+                        // Enable app entry as soon as the active database ("ecommerce") is seeded
+                        if ("ecommerce".equals(dbName)) {
+                            try {
+                                engine.useDatabase("ecommerce");
+                            } catch (Exception e) {
+                                SqlLog.printStackTrace(e);
+                            }
+                            isDefaultDbReady = true;
+                        }
                     }
 
                     engine.saveDirtyTables();
@@ -125,8 +151,10 @@ public class SqlApiHelper {
                     isDefaultDbReady = true;
                 }
             }
-        }).start();
+        });
+
     }
+
 
     private static void encryptExistingPlaintextFiles(File directory) {
         if (!directory.exists()) return;

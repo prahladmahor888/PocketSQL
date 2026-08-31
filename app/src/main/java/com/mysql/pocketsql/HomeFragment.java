@@ -810,6 +810,21 @@ public class HomeFragment extends Fragment {
         etKeyLabel.setLayoutParams(inputLp);
         scrollChild.addView(etKeyLabel);
 
+        EditText etKeyDb = new EditText(requireContext());
+        etKeyDb.setHint("Target Database (e.g. ecommerce, banking, or * for all)");
+        etKeyDb.setHintTextColor(Color.parseColor("#555555"));
+        etKeyDb.setTextColor(Color.parseColor("#00E5FF"));
+        etKeyDb.setTextSize(TypedValue.COMPLEX_UNIT_SP, 13);
+        etKeyDb.setBackgroundColor(Color.parseColor("#151515"));
+        etKeyDb.setPadding(dp12, dp8, dp12, dp8);
+        LinearLayout.LayoutParams dbLp = new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT);
+        dbLp.setMargins(0, 0, 0, dp8);
+        etKeyDb.setLayoutParams(dbLp);
+        String currentDbName = (engine != null && engine.getActiveDatabase() != null) ? engine.getActiveDatabase() : "*";
+        etKeyDb.setText(currentDbName);
+        scrollChild.addView(etKeyDb);
+
         TextView btnGenerate = new TextView(requireContext());
         btnGenerate.setText("Generate Key");
         btnGenerate.setTextColor(Color.BLACK);
@@ -824,6 +839,7 @@ public class HomeFragment extends Fragment {
                 LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT);
         btnGenerate.setLayoutParams(generateLp);
         scrollChild.addView(btnGenerate);
+
 
         // --- Usage Instructions ---
         TextView tvGuideTitle = new TextView(requireContext());
@@ -897,6 +913,7 @@ public class HomeFragment extends Fragment {
                     if (keyObj == null) continue;
                     String label = keyObj.optString("name", "API Key");
                     String date = keyObj.optString("created_at", "");
+                    String targetDb = keyObj.optString("database", "*");
 
                     // Item container (Card)
                     LinearLayout item = new LinearLayout(requireContext());
@@ -914,12 +931,13 @@ public class HomeFragment extends Fragment {
                     labelRow.setGravity(android.view.Gravity.CENTER_VERTICAL);
 
                     TextView tvLabel = new TextView(requireContext());
-                    tvLabel.setText(label);
+                    tvLabel.setText(label + " [" + targetDb + "]");
                     tvLabel.setTextColor(Color.WHITE);
                     tvLabel.setTextSize(TypedValue.COMPLEX_UNIT_SP, 13);
                     tvLabel.setTypeface(Typeface.create("sans-serif-medium", Typeface.BOLD));
                     tvLabel.setLayoutParams(new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f));
                     labelRow.addView(tvLabel);
+
 
                     TextView tvDate = new TextView(requireContext());
                     tvDate.setText(date);
@@ -1021,11 +1039,16 @@ public class HomeFragment extends Fragment {
             if (label.isEmpty()) {
                 label = "API Key";
             }
-            apiKeyManager.generateKey(label);
+            String targetDb = etKeyDb.getText().toString().trim();
+            if (targetDb.isEmpty()) {
+                targetDb = "*";
+            }
+            apiKeyManager.generateKey(label, targetDb);
             etKeyLabel.setText("");
             Toast.makeText(requireContext(), R.string.toast_key_generated, Toast.LENGTH_SHORT).show();
             repopulate.run(); // Refresh list!
         });
+
 
         // Initialize lists
         repopulate.run();
@@ -2136,14 +2159,17 @@ public class HomeFragment extends Fragment {
                 multiLineBuffer.setLength(0);
             }
 
-            // Handle cancellation
-            if (trimmedLine.equalsIgnoreCase("\\c")) {
-                final String currentPrompt = promptTxt;
-                final String currentLine = line;
+            // Handle screen clearing & command buffer cancellation (\c, clear, cls)
+            String cleanCmd = trimmedLine.toLowerCase();
+            if (cleanCmd.endsWith(";")) {
+                cleanCmd = cleanCmd.substring(0, cleanCmd.length() - 1).trim();
+            }
+
+            if (cleanCmd.equals("\\c") || cleanCmd.equals("clear") || cleanCmd.equals("cls") || cleanCmd.equals("\\cls")) {
                 if (getActivity() != null && isAdded()) {
                     getActivity().runOnUiThread(() -> {
-                        tvTerminalHistory.append(currentPrompt + currentLine + "\n");
                         multiLineBuffer.setLength(0);
+                        clearConsoleScreen();
                         refreshTerminalPrompt();
                         etCommandInput.setEnabled(true);
                         showKeyboard();
@@ -2153,7 +2179,7 @@ public class HomeFragment extends Fragment {
             }
 
             // Handle session exit
-            if (multiLineBuffer.length() == 0 && (trimmedLine.equalsIgnoreCase("exit") || trimmedLine.equalsIgnoreCase("quit") || trimmedLine.equalsIgnoreCase("\\q"))) {
+            if (multiLineBuffer.length() == 0 && (cleanCmd.equals("exit") || cleanCmd.equals("quit") || cleanCmd.equals("\\q"))) {
                 if (getActivity() != null && isAdded()) {
                     getActivity().runOnUiThread(() -> {
                         settings.setAutoLogin(false);
@@ -2173,17 +2199,6 @@ public class HomeFragment extends Fragment {
                 return;
             }
 
-            // Handle screen clearing
-            if (multiLineBuffer.length() == 0 && (trimmedLine.equalsIgnoreCase("clear") || trimmedLine.equalsIgnoreCase("\\c"))) {
-                if (getActivity() != null && isAdded()) {
-                    getActivity().runOnUiThread(() -> {
-                        clearConsoleScreen();
-                        etCommandInput.setEnabled(true);
-                        showKeyboard();
-                    });
-                }
-                continue;
-            }
 
             // Handle delimiter command immediately
             if (multiLineBuffer.length() == 0 && trimmedLine.toLowerCase().startsWith("delimiter ")) {
@@ -2214,6 +2229,12 @@ public class HomeFragment extends Fragment {
                 } else if (trimmedLine.toLowerCase().startsWith("help ")) {
                     isHelpCmd = true;
                     helpTopic = trimmedLine.substring(5).trim();
+                    // Normalize: strip trailing ';' so "HELP CONCAT_WS();" works.
+                    // Keep "()" intact so function names still match HELP_MAP keys like "CONCAT_WS()".
+                    if (helpTopic.endsWith(";")) {
+                        helpTopic = helpTopic.substring(0, helpTopic.length() - 1).trim();
+                    }
+
                 }
             }
 

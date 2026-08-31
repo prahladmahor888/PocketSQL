@@ -14,17 +14,22 @@ public class MainActivity extends AppCompatActivity {
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         
-        // Initialize SQL API helper and trigger default DB checks/loading early
-        com.mysql.pocketsql.engine.SqlApiHelper.init(this);
-        
-
-
-
         EdgeToEdge.enable(this);
         setContentView(R.layout.activity_main);
-        
-        // Trigger Google Play Integrity check on app startup
-        com.mysql.pocketsql.engine.AppIntegrityManager.checkAppIntegrity(this);
+
+        if (savedInstanceState == null) {
+            getSupportFragmentManager()
+                    .beginTransaction()
+                    .replace(R.id.main_container, new SplashFragment())
+                    .commit();
+        }
+
+        // Initialize SQL Engine and API Helper asynchronously using CPU Thread Scheduler
+        com.mysql.pocketsql.engine.SqlThreadScheduler.runDatabaseInitTask(() -> {
+            com.mysql.pocketsql.engine.SqlApiHelper.init(MainActivity.this);
+            com.mysql.pocketsql.engine.AppIntegrityManager.checkAppIntegrity(MainActivity.this);
+        });
+
         android.view.View mainView = findViewById(R.id.main);
         if (mainView != null) {
             new SettingsManager(this).applyFontToViewTree(mainView);
@@ -34,12 +39,5 @@ public class MainActivity extends AppCompatActivity {
             v.setPadding(systemBars.left, systemBars.top, systemBars.right, systemBars.bottom);
             return insets;
         });
-
-        if (savedInstanceState == null) {
-            getSupportFragmentManager()
-                    .beginTransaction()
-                    .replace(R.id.main_container, new SplashFragment())
-                    .commit();
-        }
     }
 }

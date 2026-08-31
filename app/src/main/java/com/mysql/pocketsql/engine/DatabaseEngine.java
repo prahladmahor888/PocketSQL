@@ -105,10 +105,19 @@ public class DatabaseEngine {
         try {
             String[] systemDbs = {"information_schema", "pocketsql", "sys"};
             for (String db : systemDbs) {
+                if (storageEngine.databaseExists(db)) {
+                    try {
+                        JSONObject existingSchema = storageEngine.readSchema(db);
+                        if (existingSchema != null && existingSchema.length() > 0) {
+                            continue; // System schema already exists on disk! Skip heavy rewrite!
+                        }
+                    } catch (Exception ignored) {}
+                }
                 storageEngine.createDatabaseDir(db);
                 JSONObject schemaJson = new JSONObject();
                 List<String> tables = systemDbManager.getSystemTables(db);
                 for (String tbl : tables) {
+
                     try {
                         TableData td = systemDbManager.getSystemTable(this, db, tbl);
                         JSONObject tableSchema = new JSONObject();
@@ -242,7 +251,14 @@ public class DatabaseEngine {
         }
     }
 
+    private String lastAuthUser = null;
+    private String lastAuthPass = null;
+
     public boolean authenticate(String username, String password) {
+        if (username != null && username.equals(lastAuthUser) && password != null && password.equals(lastAuthPass)) {
+            setCurrentUser(username, "localhost");
+            return true;
+        }
         try {
             loadUsers();
             
@@ -251,16 +267,13 @@ public class DatabaseEngine {
                 JSONObject userObj = cachedUsers.getJSONObject(key);
                 String stored = userObj.getString("password");
                 if (SecurityHelper.verifyPassword(password, stored)) {
-                    // Dynamic Upgrade: if legacy format (not starting with $argon2id$) was stored, upgrade it to Argon2id
-                    if (!stored.startsWith("$argon2id$")) {
-                        String newHash = SecurityHelper.hashPassword(password);
-                        userObj.put("password", newHash);
-                        storageEngine.writeUsers(cachedUsers);
-                    }
+                    lastAuthUser = username;
+                    lastAuthPass = password;
                     setCurrentUser(username, "localhost");
                     return true;
                 }
             }
+
             Iterator<String> keys = cachedUsers.keys();
             while (keys.hasNext()) {
                 String k = keys.next();

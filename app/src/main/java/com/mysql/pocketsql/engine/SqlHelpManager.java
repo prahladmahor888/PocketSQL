@@ -449,7 +449,21 @@ public class SqlHelpManager {
             String cleanTopic = topic.trim().toUpperCase();
             // Try direct match
             String desc = HELP_MAP.get(cleanTopic);
+            if (desc == null && !cleanTopic.endsWith("()")) {
+                desc = HELP_MAP.get(cleanTopic + "()");
+                if (desc != null) {
+                    cleanTopic = cleanTopic + "()";
+                }
+            }
+            if (desc == null && cleanTopic.endsWith("()")) {
+                String alt = cleanTopic.substring(0, cleanTopic.length() - 2);
+                desc = HELP_MAP.get(alt);
+                if (desc != null) {
+                    cleanTopic = alt;
+                }
+            }
             if (desc == null) {
+
                 // Try case-insensitive substring/prefix match
                 List<String> matches = new ArrayList<>();
                 for (String key : HELP_MAP.keySet()) {

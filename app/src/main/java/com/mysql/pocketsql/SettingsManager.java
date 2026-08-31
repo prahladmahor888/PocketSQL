@@ -40,23 +40,33 @@ public class SettingsManager {
 
     // ─────────────────────────────────────────────────────────────────────────
 
+    private static volatile SharedPreferences cachedPrefs;
     private SharedPreferences prefs;
 
     public SettingsManager(Context context) {
-        try {
-            String masterKeyAlias = androidx.security.crypto.MasterKeys.getOrCreate(androidx.security.crypto.MasterKeys.AES256_GCM_SPEC);
-            prefs = androidx.security.crypto.EncryptedSharedPreferences.create(
-                PREFS_NAME,
-                masterKeyAlias,
-                context,
-                androidx.security.crypto.EncryptedSharedPreferences.PrefKeyEncryptionScheme.AES256_SIV,
-                androidx.security.crypto.EncryptedSharedPreferences.PrefValueEncryptionScheme.AES256_GCM
-            );
-        } catch (Exception e) {
-            // Fallback to standard SharedPreferences if KeyStore is not available (e.g., in JVM tests or legacy devices)
-            prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE);
+        if (cachedPrefs != null) {
+            prefs = cachedPrefs;
+            return;
+        }
+        synchronized (SettingsManager.class) {
+            if (cachedPrefs == null) {
+                try {
+                    String masterKeyAlias = androidx.security.crypto.MasterKeys.getOrCreate(androidx.security.crypto.MasterKeys.AES256_GCM_SPEC);
+                    cachedPrefs = androidx.security.crypto.EncryptedSharedPreferences.create(
+                        PREFS_NAME,
+                        masterKeyAlias,
+                        context.getApplicationContext(),
+                        androidx.security.crypto.EncryptedSharedPreferences.PrefKeyEncryptionScheme.AES256_SIV,
+                        androidx.security.crypto.EncryptedSharedPreferences.PrefValueEncryptionScheme.AES256_GCM
+                    );
+                } catch (Exception e) {
+                    cachedPrefs = context.getApplicationContext().getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE);
+                }
+            }
+            prefs = cachedPrefs;
         }
     }
+
 
     // ── Theme ─────────────────────────────────────────────────────────────────
 

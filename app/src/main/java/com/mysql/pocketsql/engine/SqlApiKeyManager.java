@@ -78,13 +78,21 @@ public class SqlApiKeyManager {
     }
 
     public synchronized String generateKey(String label) {
+        return generateKey(label, "*");
+    }
+
+    public synchronized String generateKey(String label, String database) {
         if (label == null || label.trim().isEmpty()) {
             label = "API Key";
+        }
+        if (database == null || database.trim().isEmpty()) {
+            database = "*";
         }
         String newKey = "psql_live_" + UUID.randomUUID().toString().replace("-", "");
         try {
             JSONObject keyData = new JSONObject();
             keyData.put("name", label);
+            keyData.put("database", database.trim());
             
             SimpleDateFormat sdf = new SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.getDefault());
             keyData.put("created_at", sdf.format(new Date()));
@@ -96,6 +104,19 @@ public class SqlApiKeyManager {
         }
         return newKey;
     }
+
+    public synchronized String getKeyDatabase(String key) {
+        if (key == null || !cachedKeys.has(key)) {
+            return "*";
+        }
+        JSONObject data = cachedKeys.optJSONObject(key);
+        if (data != null && data.has("database")) {
+            String db = data.optString("database", "*").trim();
+            return db.isEmpty() ? "*" : db;
+        }
+        return "*";
+    }
+
 
     public synchronized void deleteKey(String key) {
         if (key == null) return;
