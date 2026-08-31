@@ -2768,6 +2768,86 @@ public class HomeFragment extends Fragment {
         backup.add(new TemplateItem("Import Database (SQL/DB/XLSX/CSV)", "IMPORT DATABASE <db_name> FROM '/sdcard/Download/<backup_file>';"));
         list.add(new TemplateCategory("EXPORT & IMPORT", backup));
 
+        // 9. Advanced Functions
+        List<TemplateItem> advFuncs = new ArrayList<>();
+        advFuncs.add(new TemplateItem("CONCAT_WS (join with separator)", "SELECT CONCAT_WS(', ', city, state, country) AS address FROM <table>;"));
+        advFuncs.add(new TemplateItem("FORMAT number", "SELECT FORMAT(1234567.89, 2); -- '1,234,567.89'"));
+        advFuncs.add(new TemplateItem("String: LPAD / RPAD", "SELECT LPAD('42', 6, '0'), RPAD('hi', 6, '-'); -- '000042', 'hi----'"));
+        advFuncs.add(new TemplateItem("String: INSTR / LOCATE", "SELECT INSTR('PocketSQL', 'SQL'), LOCATE('SQL', 'PocketSQL');"));
+        advFuncs.add(new TemplateItem("String: LEFT / RIGHT / SUBSTR", "SELECT LEFT(<col>, 5), RIGHT(<col>, 3), SUBSTR(<col>, 2, 4) FROM <table>;"));
+        advFuncs.add(new TemplateItem("String: REVERSE / HEX / UNHEX", "SELECT REVERSE('SQL'), HEX(255), UNHEX('FF');"));
+        advFuncs.add(new TemplateItem("FIELD / FIND_IN_SET", "SELECT FIELD('b','a','b','c'), FIND_IN_SET('b','a,b,c'); -- 2, 2"));
+        advFuncs.add(new TemplateItem("Math: POWER / SQRT / LOG2 / LOG10", "SELECT POWER(2,10), SQRT(64), LOG2(8), LOG10(1000);"));
+        advFuncs.add(new TemplateItem("Math: TRUNCATE / LEAST / GREATEST", "SELECT TRUNCATE(3.14159, 2), LEAST(10,3,7), GREATEST(10,3,7);"));
+        advFuncs.add(new TemplateItem("Math: SIN / COS / TAN / PI", "SELECT SIN(PI()/2), COS(0), TAN(PI()/4), PI();"));
+        advFuncs.add(new TemplateItem("Date: EXTRACT unit from date", "SELECT EXTRACT(YEAR FROM NOW()), EXTRACT(MONTH FROM order_date) FROM orders;"));
+        advFuncs.add(new TemplateItem("Date: DAYNAME / WEEKDAY / WEEK", "SELECT DAYNAME(NOW()), WEEKDAY(NOW()), WEEK(NOW());"));
+        advFuncs.add(new TemplateItem("Date: STR_TO_DATE (parse string)", "SELECT STR_TO_DATE('31-08-2026', '%d-%m-%Y');"));
+        advFuncs.add(new TemplateItem("Date: TIMESTAMPDIFF (age in years)", "SELECT name, TIMESTAMPDIFF(YEAR, birth_date, NOW()) AS age FROM users;"));
+        advFuncs.add(new TemplateItem("Date: LAST_DAY / MAKEDATE / MAKETIME", "SELECT LAST_DAY(NOW()), MAKEDATE(2026, 243), MAKETIME(14,30,0);"));
+        advFuncs.add(new TemplateItem("NULLIF (avoid divide-by-zero)", "SELECT total / NULLIF(count, 0) AS avg_val FROM stats;"));
+        advFuncs.add(new TemplateItem("CAST / CONVERT type", "SELECT CAST('42' AS INT), CAST(NOW() AS DATE), CONVERT('3.14', DECIMAL(10,2));"));
+        advFuncs.add(new TemplateItem("System: DATABASE / VERSION / USER", "SELECT DATABASE(), VERSION(), CURRENT_USER(), CONNECTION_ID();"));
+        list.add(new TemplateCategory("ADVANCED FUNCTIONS", advFuncs));
+
+        // 10. Window Functions (LAG / LEAD / NTILE)
+        List<TemplateItem> windowFuncs = new ArrayList<>();
+        windowFuncs.add(new TemplateItem("LAG – previous row value", "SELECT date, sales,\n  LAG(sales, 1, 0) OVER (ORDER BY date) AS prev_sales,\n  sales - LAG(sales, 1, 0) OVER (ORDER BY date) AS change\nFROM daily_sales;"));
+        windowFuncs.add(new TemplateItem("LEAD – next row value", "SELECT date, sales,\n  LEAD(sales, 1) OVER (ORDER BY date) AS next_sales\nFROM daily_sales;"));
+        windowFuncs.add(new TemplateItem("NTILE – quartile ranking", "SELECT name, salary,\n  NTILE(4) OVER (ORDER BY salary) AS quartile\nFROM employees;"));
+        windowFuncs.add(new TemplateItem("FIRST_VALUE / LAST_VALUE", "SELECT dept, name, salary,\n  FIRST_VALUE(salary) OVER (PARTITION BY dept ORDER BY salary) AS lowest,\n  LAST_VALUE(salary)  OVER (PARTITION BY dept ORDER BY salary\n    ROWS BETWEEN UNBOUNDED PRECEDING AND UNBOUNDED FOLLOWING) AS highest\nFROM employees;"));
+        windowFuncs.add(new TemplateItem("Running total (SUM OVER)", "SELECT date, amount,\n  SUM(amount) OVER (ORDER BY date ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW) AS running_total\nFROM transactions;"));
+        windowFuncs.add(new TemplateItem("Percent of total (ratio)", "SELECT dept, salary,\n  ROUND(salary * 100.0 / SUM(salary) OVER (), 2) AS pct_of_total\nFROM employees;"));
+        list.add(new TemplateCategory("WINDOW FUNCTIONS (LAG/LEAD/NTILE)", windowFuncs));
+
+        // 11. Stored Programs
+        List<TemplateItem> stored = new ArrayList<>();
+        stored.add(new TemplateItem("Create Stored Procedure", "DELIMITER //\nCREATE PROCEDURE GetActiveUsers()\nBEGIN\n  SELECT * FROM users WHERE status = 'active';\nEND //\nDELIMITER ;"));
+        stored.add(new TemplateItem("Procedure with IN parameter", "DELIMITER //\nCREATE PROCEDURE GetUserById(IN p_id INT)\nBEGIN\n  SELECT * FROM users WHERE id = p_id;\nEND //\nDELIMITER ;"));
+        stored.add(new TemplateItem("Procedure with OUT parameter", "DELIMITER //\nCREATE PROCEDURE CountUsers(OUT p_count INT)\nBEGIN\n  SELECT COUNT(*) INTO p_count FROM users;\nEND //\nDELIMITER ;\nCALL CountUsers(@cnt);\nSELECT @cnt;"));
+        stored.add(new TemplateItem("Create Scalar Function", "DELIMITER //\nCREATE FUNCTION GetTax(price DECIMAL(10,2))\nRETURNS DECIMAL(10,2)\nDETERMINISTIC\nBEGIN\n  RETURN price * 0.18;\nEND //\nDELIMITER ;"));
+        stored.add(new TemplateItem("WHILE Loop in Procedure", "DELIMITER //\nCREATE PROCEDURE CountLoop()\nBEGIN\n  DECLARE i INT DEFAULT 1;\n  WHILE i <= 5 DO\n    INSERT INTO log_tbl (val) VALUES (i);\n    SET i = i + 1;\n  END WHILE;\nEND //\nDELIMITER ;"));
+        stored.add(new TemplateItem("REPEAT..UNTIL Loop", "DELIMITER //\nCREATE PROCEDURE RepeatDemo()\nBEGIN\n  DECLARE i INT DEFAULT 1;\n  REPEAT\n    INSERT INTO log_tbl (val) VALUES (i);\n    SET i = i + 1;\n  UNTIL i > 5\n  END REPEAT;\nEND //\nDELIMITER ;"));
+        stored.add(new TemplateItem("Create AFTER INSERT Trigger", "DELIMITER //\nCREATE TRIGGER after_user_insert\nAFTER INSERT ON users\nFOR EACH ROW\nBEGIN\n  INSERT INTO audit_log (action, record_id, done_at)\n  VALUES ('INSERT', NEW.id, NOW());\nEND //\nDELIMITER ;"));
+        stored.add(new TemplateItem("Create BEFORE UPDATE Trigger", "DELIMITER //\nCREATE TRIGGER before_salary_update\nBEFORE UPDATE ON employees\nFOR EACH ROW\nBEGIN\n  IF NEW.salary < 0 THEN\n    SET NEW.salary = 0;\n  END IF;\nEND //\nDELIMITER ;"));
+        stored.add(new TemplateItem("DECLARE + IF..ELSE in Procedure", "DELIMITER //\nCREATE PROCEDURE ClassifyScore(IN score INT)\nBEGIN\n  DECLARE grade VARCHAR(2);\n  IF score >= 90 THEN SET grade = 'A';\n  ELSEIF score >= 75 THEN SET grade = 'B';\n  ELSE SET grade = 'C';\n  END IF;\n  SELECT grade;\nEND //\nDELIMITER ;"));
+        stored.add(new TemplateItem("Call Procedure", "CALL <procedure_name>();"));
+        stored.add(new TemplateItem("Drop Procedure / Function / Trigger", "DROP PROCEDURE IF EXISTS <procedure_name>;\nDROP FUNCTION  IF EXISTS <function_name>;\nDROP TRIGGER   IF EXISTS <trigger_name>;"));
+        list.add(new TemplateCategory("STORED PROGRAMS (PROC/FUNC/TRIGGER)", stored));
+
+        // 12. JSON & GROUP_CONCAT
+        List<TemplateItem> json = new ArrayList<>();
+        json.add(new TemplateItem("Build JSON object from columns", "SELECT JSON_OBJECT('id', id, 'name', name, 'email', email) AS user_json FROM users;"));
+        json.add(new TemplateItem("Build JSON array", "SELECT JSON_ARRAY(10, 20, 30, 'hello');"));
+        json.add(new TemplateItem("JSON_SET – add/update key", "SELECT JSON_SET('{\"a\":1}', '$.b', 2, '$.a', 99); -- '{\"a\":99,\"b\":2}'"));
+        json.add(new TemplateItem("JSON_REMOVE – delete key", "SELECT JSON_REMOVE('{\"a\":1,\"b\":2}', '$.b'); -- '{\"a\":1}'"));
+        json.add(new TemplateItem("JSON_CONTAINS – check value", "SELECT JSON_CONTAINS('[1,2,3]', '2'); -- 1"));
+        json.add(new TemplateItem("JSON_EXTRACT nested path", "SELECT JSON_EXTRACT(metadata, '$.user.name') FROM logs;"));
+        json.add(new TemplateItem("GROUP_CONCAT – comma list", "SELECT dept,\n  GROUP_CONCAT(name ORDER BY name SEPARATOR ', ') AS members\nFROM employees\nGROUP BY dept;"));
+        json.add(new TemplateItem("GROUP_CONCAT DISTINCT with count", "SELECT category,\n  COUNT(*) AS total,\n  GROUP_CONCAT(DISTINCT tag ORDER BY tag) AS tags\nFROM products\nGROUP BY category;"));
+        list.add(new TemplateCategory("JSON & GROUP_CONCAT", json));
+
+        // 13. DML with ON DUPLICATE KEY / INSERT IGNORE
+        List<TemplateItem> upsert = new ArrayList<>();
+        upsert.add(new TemplateItem("INSERT IGNORE (skip duplicates)", "INSERT IGNORE INTO users (email, name) VALUES ('<email>', '<name>');"));
+        upsert.add(new TemplateItem("ON DUPLICATE KEY UPDATE (upsert)", "INSERT INTO page_visits (page, hits)\nVALUES ('<page>', 1)\nON DUPLICATE KEY UPDATE hits = hits + 1;"));
+        upsert.add(new TemplateItem("Multi-row upsert", "INSERT INTO settings (user_id, theme, lang)\nVALUES (1, 'dark', 'en'), (2, 'light', 'hi')\nON DUPLICATE KEY UPDATE theme = VALUES(theme), lang = VALUES(lang);"));
+        upsert.add(new TemplateItem("Recursive CTE (number series)", "WITH RECURSIVE nums AS (\n  SELECT 1 AS n\n  UNION ALL\n  SELECT n + 1 FROM nums WHERE n < 10\n)\nSELECT * FROM nums;"));
+        upsert.add(new TemplateItem("Recursive CTE (hierarchy/tree)", "WITH RECURSIVE org AS (\n  SELECT id, name, manager_id FROM employees WHERE manager_id IS NULL\n  UNION ALL\n  SELECT e.id, e.name, e.manager_id FROM employees e\n  INNER JOIN org o ON e.manager_id = o.id\n)\nSELECT * FROM org;"));
+        list.add(new TemplateCategory("UPSERT / RECURSIVE CTE", upsert));
+
+        // 14. Security & Encryption
+        List<TemplateItem> security = new ArrayList<>();
+        security.add(new TemplateItem("MD5 hash", "SELECT MD5('<plaintext>');"));
+        security.add(new TemplateItem("SHA-256 hash (SHA2)", "SELECT SHA2('<plaintext>', 256);"));
+        security.add(new TemplateItem("SHA-1 hash", "SELECT SHA1('<plaintext>');"));
+        security.add(new TemplateItem("AES Encrypt / Decrypt", "SELECT AES_ENCRYPT('<plaintext>', '<secret_key>');\nSELECT AES_DECRYPT(<encrypted_col>, '<secret_key>') FROM <table>;"));
+        security.add(new TemplateItem("BINARY case-sensitive compare", "SELECT BINARY 'Password' = BINARY 'password'; -- 0 (not equal)"));
+        security.add(new TemplateItem("Create User & Grant Privileges", "CREATE USER '<user>'@'localhost' IDENTIFIED BY '<password>';\nGRANT SELECT, INSERT, UPDATE, DELETE ON <db>.* TO '<user>'@'localhost';\nFLUSH PRIVILEGES;"));
+        security.add(new TemplateItem("SHOW GRANTS for user", "SHOW GRANTS FOR '<user>'@'localhost';"));
+        security.add(new TemplateItem("REVOKE all from user", "REVOKE ALL PRIVILEGES ON <db>.* FROM '<user>'@'localhost';"));
+        list.add(new TemplateCategory("SECURITY & ENCRYPTION", security));
+
         return list;
     }
 
