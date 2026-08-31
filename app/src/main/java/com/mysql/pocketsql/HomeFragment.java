@@ -342,10 +342,13 @@ public class HomeFragment extends Fragment {
         etCommandInput.setFocusableInTouchMode(true);
         etCommandInput.setEnabled(true);
         if (!isPassword) {
-            inputType |= android.text.InputType.TYPE_TEXT_FLAG_MULTI_LINE | android.text.InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS;
+            // Do NOT add TYPE_TEXT_FLAG_MULTI_LINE — it overrides imeOptions and makes
+            // the Enter key insert newlines instead of executing the query.
+            inputType |= android.text.InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS;
         }
         etCommandInput.setInputType(inputType);
         if (!isPassword) {
+            etCommandInput.setImeOptions(android.view.inputmethod.EditorInfo.IME_ACTION_SEND);
             etCommandInput.setSingleLine(false);
             etCommandInput.setHorizontallyScrolling(false);
         }
