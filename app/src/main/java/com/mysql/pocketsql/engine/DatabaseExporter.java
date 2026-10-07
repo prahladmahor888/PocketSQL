@@ -88,17 +88,17 @@ public class DatabaseExporter {
                 ZipEntry entry;
                 while ((entry = zis.getNextEntry()) != null) {
                     String name = entry.getName();
-                    if ("schema.json".equals(name)) {
+                    if ("schema.json".equalsIgnoreCase(name) || name.toLowerCase().endsWith("/schema.json")) {
                         hasSchemaJson = true;
                         break;
-                    } else if ("xl/workbook.xml".equalsIgnoreCase(name)) {
+                    } else if (name.toLowerCase().contains("workbook.xml") || name.toLowerCase().startsWith("xl/")) {
                         hasWorkbookXml = true;
                     }
                 }
             }
             if (hasSchemaJson) {
                 importDbZip(engine, dbName, new ByteArrayInputStream(data));
-            } else if (hasWorkbookXml) {
+            } else if (hasWorkbookXml || "xlsx".equalsIgnoreCase(formatHint) || "xls".equalsIgnoreCase(formatHint)) {
                 importXlsx(engine, dbName, data);
             } else {
                 importCsvZip(engine, dbName, new ByteArrayInputStream(data));
@@ -113,6 +113,8 @@ public class DatabaseExporter {
                             upper.startsWith("CREATE DATABASE") ||
                             upper.startsWith("USE") ||
                             upper.startsWith("CREATE TABLE") ||
+                            upper.startsWith("--") ||
+                            upper.startsWith("/*") ||
                             upper.contains("INSERT INTO") ||
                             upper.contains("DROP TABLE") ||
                             upper.contains("CREATE VIEW") ||
@@ -194,7 +196,13 @@ public class DatabaseExporter {
         try (ZipInputStream zis = new ZipInputStream(is)) {
             ZipEntry entry;
             while ((entry = zis.getNextEntry()) != null) {
+                if (entry.isDirectory()) continue;
                 String name = entry.getName();
+                if (name.contains("/")) {
+                    name = name.substring(name.lastIndexOf('/') + 1);
+                }
+                if (name.isEmpty()) continue;
+
                 File outFile = new File(dbFolder, name);
                 if (!outFile.getCanonicalPath().startsWith(dbFolder.getCanonicalPath())) {
                     throw new Exception("Security Error: Zip Slip detected in entry " + name);
@@ -208,6 +216,8 @@ public class DatabaseExporter {
                 zis.closeEntry();
             }
         }
+        engine.clearTableCache(dbName);
+        engine.useDatabase(dbName);
         
         if (dbName.equalsIgnoreCase("pocketsql")) {
             try {
@@ -809,18 +819,18 @@ public class DatabaseExporter {
         }
 
         // Ensure database exists and is selected
-        engine.execute("CREATE DATABASE IF NOT EXISTS " + dbName + ";");
-        engine.execute("USE " + dbName + ";");
+        engine.execute("CREATE DATABASE IF NOT EXISTS `" + dbName + "`;");
+        engine.useDatabase(dbName);
 
         // DROP table if exists first to make it a fresh replace import
-        engine.execute("DROP TABLE IF EXISTS " + tableName + ";");
+        engine.execute("DROP TABLE IF EXISTS `" + tableName + "`;");
 
         // Build CREATE TABLE
         StringBuilder createSb = new StringBuilder();
-        createSb.append("CREATE TABLE ").append(tableName).append(" (");
+        createSb.append("CREATE TABLE `").append(tableName).append("` (");
         for (int i = 0; i < cleanedHeaders.size(); i++) {
             if (i > 0) createSb.append(", ");
-            createSb.append(cleanedHeaders.get(i)).append(" ").append(types.get(i));
+            createSb.append("`").append(cleanedHeaders.get(i)).append("` ").append(types.get(i));
         }
         createSb.append(");");
         QueryResult res = engine.execute(createSb.toString());
@@ -834,10 +844,10 @@ public class DatabaseExporter {
             try {
                 for (List<String> row : bodyRows) {
                     StringBuilder insertSb = new StringBuilder();
-                    insertSb.append("INSERT INTO ").append(tableName).append(" (");
+                    insertSb.append("INSERT INTO `").append(tableName).append("` (");
                     for (int i = 0; i < cleanedHeaders.size(); i++) {
                         if (i > 0) insertSb.append(", ");
-                        insertSb.append(cleanedHeaders.get(i));
+                        insertSb.append("`").append(cleanedHeaders.get(i)).append("`");
                     }
                     insertSb.append(") VALUES (");
                     for (int i = 0; i < cleanedHeaders.size(); i++) {
@@ -850,10 +860,11 @@ public class DatabaseExporter {
                                 insertSb.append("NULL");
                             } else {
                                 String type = types.get(i);
+                                String cleanVal = val.trim();
                                 if ("INT".equals(type) || "DOUBLE".equals(type)) {
-                                    insertSb.append(val);
+                                    insertSb.append(cleanVal);
                                 } else {
-                                    insertSb.append("'").append(val.replace("'", "''")).append("'");
+                                    insertSb.append("'").append(cleanVal.replace("'", "''")).append("'");
                                 }
                             }
                         }

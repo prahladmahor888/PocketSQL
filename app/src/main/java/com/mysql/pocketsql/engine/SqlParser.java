@@ -643,9 +643,18 @@ public class SqlParser {
                         }
                         parsedConstraint = true;
                     } else if ("INDEX".equals(val) || "KEY".equals(val) || "FULLTEXT".equals(val) || "SPATIAL".equals(val)) {
-                        // Skip it
-                        while (!peek().value.equals(",") && !peek().value.equals(")") &&
-                               peek().type != SqlToken.Type.EOF) {
+                        // Skip index definition balancing parentheses until comma or closing parenthesis of CREATE TABLE
+                        int parenDepth = 0;
+                        while (peek().type != SqlToken.Type.EOF) {
+                            SqlToken t = peek();
+                            if (parenDepth == 0 && (t.value.equals(",") || t.value.equals(")"))) {
+                                break;
+                            }
+                            if (t.value.equals("(")) {
+                                parenDepth++;
+                            } else if (t.value.equals(")")) {
+                                parenDepth--;
+                            }
                             consume();
                         }
                         parsedConstraint = true;
@@ -3478,6 +3487,52 @@ projection.add(selectItem);
             }
             check.put("value", val);
             consume();
+
+            if (matchKeyword("AND")) {
+                if (isIdentifier(peek())) {
+                    consume(); // optional column name in 2nd condition
+                }
+                if (peek().type == SqlToken.Type.SYMBOL || peek().type == SqlToken.Type.KEYWORD) {
+                    String op2 = consume().value.toUpperCase();
+                    SqlToken highToken = peek();
+                    if (highToken.type != SqlToken.Type.SYMBOL || !highToken.value.equals(")")) {
+                        consume();
+                        Object val2 = highToken.value;
+                        if (highToken.type == SqlToken.Type.NUMBER) {
+                            if (highToken.value.contains(".")) val2 = Double.parseDouble(highToken.value);
+                            else val2 = Long.parseLong(highToken.value);
+                        }
+
+                        if ((">=".equals(op) || ">".equals(op)) && ("<=".equals(op2) || "<".equals(op2))) {
+                            check.put("operator", "BETWEEN");
+                            check.remove("value");
+                            List<Object> range = new ArrayList<>();
+                            range.add(val);
+                            range.add(val2);
+                            check.put("values", range);
+                        } else if (("<=".equals(op) || "<".equals(op)) && (">=".equals(op2) || ">".equals(op2))) {
+                            check.put("operator", "BETWEEN");
+                            check.remove("value");
+                            List<Object> range = new ArrayList<>();
+                            range.add(val2);
+                            range.add(val);
+                            check.put("values", range);
+                        }
+                    }
+                }
+            }
+        }
+        int depth = 0;
+        while (peek().type != SqlToken.Type.EOF) {
+            if (depth == 0 && peek().type == SqlToken.Type.SYMBOL && ")".equals(peek().value)) {
+                break;
+            }
+            SqlToken t = consume();
+            if (t.type == SqlToken.Type.SYMBOL && "(".equals(t.value)) {
+                depth++;
+            } else if (t.type == SqlToken.Type.SYMBOL && ")".equals(t.value)) {
+                depth--;
+            }
         }
         expectSymbol(")", "Expected ')' to close CHECK constraint");
         return check;

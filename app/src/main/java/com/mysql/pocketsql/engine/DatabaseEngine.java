@@ -7115,6 +7115,22 @@ public class DatabaseEngine {
         }
     }
 
+    public synchronized void clearTableCache(String dbName) {
+        if (dbName == null) {
+            tableCache.clear();
+            return;
+        }
+        String prefix = dbName.toLowerCase() + ".";
+        Iterator<String> it = tableCache.keySet().iterator();
+        while (it.hasNext()) {
+            String key = it.next();
+            if (key.toLowerCase().startsWith(prefix)) {
+                it.remove();
+            }
+        }
+    }
+
+
     public QueryResult setVariable(String name, Object value) throws Exception {
         if (name == null) {
             throw new Exception("Variable name cannot be null");

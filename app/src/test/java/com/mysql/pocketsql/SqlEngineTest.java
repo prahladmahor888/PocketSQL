@@ -3657,5 +3657,157 @@ public class SqlEngineTest {
 
         engine.execute("DROP DATABASE test_window_arithmetic_db;");
     }
+
+    @Test
+    public void testCreateTableWithTableLevelIndexes() {
+        engine.execute("CREATE DATABASE test_create_indexes_db;");
+        engine.execute("USE test_create_indexes_db;");
+
+        String query1 = "CREATE TABLE users (" +
+                "    user_id INT PRIMARY KEY AUTO_INCREMENT," +
+                "    email VARCHAR(255) UNIQUE NOT NULL," +
+                "    password_hash VARCHAR(255) NOT NULL," +
+                "    first_name VARCHAR(100) NOT NULL," +
+                "    last_name VARCHAR(100) NOT NULL," +
+                "    phone VARCHAR(20)," +
+                "    user_type ENUM('customer', 'seller', 'admin') DEFAULT 'customer'," +
+                "    status ENUM('active', 'inactive', 'suspended') DEFAULT 'active'," +
+                "    email_verified BOOLEAN DEFAULT FALSE," +
+                "    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP," +
+                "    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP," +
+                "    last_login TIMESTAMP NULL," +
+                "    INDEX idx_email (email)," +
+                "    INDEX idx_user_type (user_type)" +
+                ");";
+        QueryResult r1 = engine.execute(query1);
+        assertTrue("Query 1 failed: " + r1.message, r1.success);
+
+        String query2 = "CREATE TABLE states (" +
+                "    state_id INT PRIMARY KEY AUTO_INCREMENT," +
+                "    state_name VARCHAR(100) NOT NULL," +
+                "    state_code VARCHAR(10) NOT NULL," +
+                "    country VARCHAR(100) DEFAULT 'India'," +
+                "    gst_state_code VARCHAR(2) NOT NULL," +
+                "    is_active BOOLEAN DEFAULT TRUE," +
+                "    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP," +
+                "    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP," +
+                "    UNIQUE KEY unique_state_code (state_code)," +
+                "    INDEX idx_gst_code (gst_state_code)" +
+                ");";
+        QueryResult r2 = engine.execute(query2);
+        assertTrue("Query 2 failed: " + r2.message, r2.success);
+
+        engine.execute("DROP DATABASE test_create_indexes_db;");
+    }
+
+    @Test
+    public void testCreateTableWithCompoundCheckConstraints() {
+        engine.execute("CREATE DATABASE test_check_comp_db;");
+        engine.execute("USE test_check_comp_db;");
+
+        // Dummy prerequisite tables for FK references
+        engine.execute("CREATE TABLE invoices (invoice_id INT PRIMARY KEY);");
+        engine.execute("CREATE TABLE users (user_id INT PRIMARY KEY);");
+
+        String query = "CREATE TABLE invoice_ratings (" +
+                "    invoice_rating_id INT PRIMARY KEY AUTO_INCREMENT," +
+                "    invoice_id INT UNIQUE NOT NULL," +
+                "    user_id INT NOT NULL," +
+                "    overall_rating INT NOT NULL CHECK (overall_rating >= 1 AND overall_rating <= 5)," +
+                "    clarity_rating INT CHECK (clarity_rating >= 1 AND clarity_rating <= 5) COMMENT 'How clear and easy to understand'," +
+                "    accuracy_rating INT CHECK (accuracy_rating >= 1 AND accuracy_rating <= 5) COMMENT 'Accuracy of charges'," +
+                "    detail_rating INT CHECK (detail_rating >= 1 AND detail_rating <= 5) COMMENT 'Level of detail provided'," +
+                "    tax_breakdown_rating INT CHECK (tax_breakdown_rating >= 1 AND tax_breakdown_rating <= 5)," +
+                "    review_text TEXT," +
+                "    issues_found TEXT COMMENT 'Any discrepancies or issues'," +
+                "    suggestions TEXT," +
+                "    invoice_helpful BOOLEAN COMMENT 'Was invoice helpful for records'," +
+                "    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP," +
+                "    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP," +
+                "    FOREIGN KEY (invoice_id) REFERENCES invoices(invoice_id) ON DELETE CASCADE," +
+                "    FOREIGN KEY (user_id) REFERENCES users(user_id) ON DELETE CASCADE," +
+                "    INDEX idx_invoice (invoice_id)," +
+                "    INDEX idx_user (user_id)," +
+                "    INDEX idx_rating (overall_rating)" +
+                ");";
+        QueryResult r = engine.execute(query);
+        assertTrue("Create invoice_ratings failed: " + r.message, r.success);
+
+        // Insert prerequisite parent rows for FKs
+        engine.execute("INSERT INTO invoices VALUES (1);");
+        engine.execute("INSERT INTO invoices VALUES (2);");
+        engine.execute("INSERT INTO users VALUES (1);");
+
+        // Test check validation logic: valid insert
+        QueryResult okInsert = engine.execute("INSERT INTO invoice_ratings (invoice_id, user_id, overall_rating, clarity_rating) VALUES (1, 1, 5, 4);");
+        assertTrue("Insert valid rating failed: " + okInsert.message, okInsert.success);
+
+        // Test check validation logic: invalid rating (6 > 5) should fail
+        QueryResult failInsert = engine.execute("INSERT INTO invoice_ratings (invoice_id, user_id, overall_rating, clarity_rating) VALUES (2, 1, 6, 4);");
+        assertFalse("Insert invalid rating (6) should fail check constraint", failInsert.success);
+
+        engine.execute("DROP DATABASE test_check_comp_db;");
+    }
+
+    @Test
+    public void testImportFormatsSqlDbXlsx() throws Exception {
+        // Setup initial database
+        engine.execute("CREATE DATABASE import_test_source;");
+        engine.execute("USE import_test_source;");
+        engine.execute("CREATE TABLE products (id INT PRIMARY KEY, name TEXT, price DOUBLE);");
+        engine.execute("INSERT INTO products VALUES (101, 'Laptop', 1200.50), (102, 'Phone', 800.00);");
+
+        File testDir = new File("build/test-import-formats");
+        if (testDir.exists()) deleteRecursive(testDir);
+        testDir.mkdirs();
+
+        // 1. Export & Import .sql
+        String sqlFile = "build/test-import-formats/backup.sql";
+        QueryResult rSqlExp = engine.execute("EXPORT DATABASE import_test_source TO '" + sqlFile + "';");
+        assertTrue("Export SQL failed: " + rSqlExp.message, rSqlExp.success);
+
+        QueryResult rSqlImp = engine.execute("IMPORT DATABASE import_test_sql FROM '" + sqlFile + "';");
+        assertTrue("Import SQL failed: " + rSqlImp.message, rSqlImp.success);
+        engine.execute("USE import_test_sql;");
+        QueryResult rSqlRes = engine.execute("SELECT * FROM products;");
+        assertTrue("Select SQL imported failed: " + rSqlRes.message, rSqlRes.success);
+        assertEquals(2, rSqlRes.rows.size());
+        assertEquals("Laptop", rSqlRes.rows.get(0).get("name"));
+
+        // 2. Export & Import .db
+        String dbFile = "build/test-import-formats/backup.db";
+        QueryResult rDbExp = engine.execute("EXPORT DATABASE import_test_source TO '" + dbFile + "';");
+        assertTrue("Export DB failed: " + rDbExp.message, rDbExp.success);
+
+        QueryResult rDbImp = engine.execute("IMPORT DATABASE import_test_db FROM '" + dbFile + "';");
+        assertTrue("Import DB failed: " + rDbImp.message, rDbImp.success);
+        engine.execute("USE import_test_db;");
+        QueryResult rDbRes = engine.execute("SELECT * FROM products;");
+        assertTrue("Select DB imported failed: " + rDbRes.message, rDbRes.success);
+        assertEquals(2, rDbRes.rows.size());
+        assertEquals("Phone", rDbRes.rows.get(1).get("name"));
+
+        // 3. Export & Import .xlsx
+        String xlsxFile = "build/test-import-formats/backup.xlsx";
+        QueryResult rXlsxExp = engine.execute("EXPORT DATABASE import_test_source TO '" + xlsxFile + "';");
+        assertTrue("Export XLSX failed: " + rXlsxExp.message, rXlsxExp.success);
+
+        QueryResult rXlsxImp = engine.execute("IMPORT DATABASE import_test_xlsx FROM '" + xlsxFile + "';");
+        assertTrue("Import XLSX failed: " + rXlsxImp.message, rXlsxImp.success);
+        engine.execute("USE import_test_xlsx;");
+        QueryResult rXlsxRes = engine.execute("SELECT * FROM products;");
+        assertTrue("Select XLSX imported failed: " + rXlsxRes.message, rXlsxRes.success);
+        assertEquals(2, rXlsxRes.rows.size());
+
+        // Cleanup
+        engine.execute("DROP DATABASE import_test_source;");
+        engine.execute("DROP DATABASE import_test_sql;");
+        engine.execute("DROP DATABASE import_test_db;");
+        engine.execute("DROP DATABASE import_test_xlsx;");
+        deleteRecursive(testDir);
+    }
 }
+
+
+
 

@@ -19,13 +19,35 @@ public class SqlScriptRunner {
      * Executes a SQL script and switches to the specified database on completion.
      */
     public static void runScript(DatabaseEngine engine, InputStream inputStream, String useDbAfter) throws Exception {
+        if (useDbAfter != null && !useDbAfter.isEmpty()) {
+            engine.execute("CREATE DATABASE IF NOT EXISTS `" + useDbAfter + "`;");
+            engine.useDatabase(useDbAfter);
+        }
+
         try (BufferedReader reader = new BufferedReader(new InputStreamReader(inputStream, StandardCharsets.UTF_8))) {
             StringBuilder statementBuilder = new StringBuilder();
             String currentDelim = ";";
             String line;
+            boolean inBlockComment = false;
 
             while ((line = reader.readLine()) != null) {
                 String trimmedLine = line.trim();
+
+                if (inBlockComment) {
+                    int endIdx = trimmedLine.indexOf("*/");
+                    if (endIdx >= 0) {
+                        inBlockComment = false;
+                        trimmedLine = trimmedLine.substring(endIdx + 2).trim();
+                        if (trimmedLine.isEmpty()) continue;
+                    } else {
+                        continue;
+                    }
+                }
+
+                if (trimmedLine.startsWith("/*") && !trimmedLine.contains("*/")) {
+                    inBlockComment = true;
+                    continue;
+                }
 
                 // Skip purely empty lines or comments
                 if (trimmedLine.isEmpty() || trimmedLine.startsWith("--") || trimmedLine.startsWith("#")) {
@@ -41,8 +63,18 @@ public class SqlScriptRunner {
                     continue;
                 }
 
-                // Append line
-                statementBuilder.append(line).append("\n");
+                // Strip inline comments for statement termination check
+                String lineForStatement = line;
+                int commentIdx = line.indexOf("--");
+                if (commentIdx >= 0) {
+                    lineForStatement = line.substring(0, commentIdx);
+                }
+                int hashIdx = lineForStatement.indexOf("#");
+                if (hashIdx >= 0) {
+                    lineForStatement = lineForStatement.substring(0, hashIdx);
+                }
+
+                statementBuilder.append(lineForStatement).append("\n");
 
                 // Check if statement is complete
                 String accumulated = statementBuilder.toString().trim();
@@ -66,9 +98,17 @@ public class SqlScriptRunner {
 
                 if (isComplete) {
                     if (!cleanSql.isEmpty()) {
+                        String upperSql = cleanSql.toUpperCase();
+                        if (useDbAfter != null && !useDbAfter.isEmpty()) {
+                            if (upperSql.startsWith("CREATE DATABASE ")) {
+                                cleanSql = "CREATE DATABASE IF NOT EXISTS `" + useDbAfter + "`";
+                            } else if (upperSql.startsWith("USE ")) {
+                                cleanSql = "USE `" + useDbAfter + "`";
+                            }
+                        }
                         QueryResult res = engine.execute(cleanSql);
                         if (!res.success) {
-                            SqlLog.err("SQL Script Error on statement");
+                            SqlLog.err("SQL Script Error on statement: " + cleanSql);
                             SqlLog.err("Message: " + res.message);
                         }
                     }
@@ -83,9 +123,17 @@ public class SqlScriptRunner {
                     remaining = remaining.substring(0, remaining.length() - currentDelim.length()).trim();
                 }
                 if (!remaining.isEmpty()) {
+                    String upperSql = remaining.toUpperCase();
+                    if (useDbAfter != null && !useDbAfter.isEmpty()) {
+                        if (upperSql.startsWith("CREATE DATABASE ")) {
+                            remaining = "CREATE DATABASE IF NOT EXISTS `" + useDbAfter + "`";
+                        } else if (upperSql.startsWith("USE ")) {
+                            remaining = "USE `" + useDbAfter + "`";
+                        }
+                    }
                     QueryResult res = engine.execute(remaining);
                     if (!res.success) {
-                        SqlLog.err("SQL Script Error on remaining statement");
+                        SqlLog.err("SQL Script Error on remaining statement: " + remaining);
                         SqlLog.err("Message: " + res.message);
                     }
                 }
@@ -93,6 +141,7 @@ public class SqlScriptRunner {
 
             // Switch to the specified database on completion
             if (useDbAfter != null && !useDbAfter.isEmpty()) {
+                engine.clearTableCache(useDbAfter);
                 engine.useDatabase(useDbAfter);
             }
         }
