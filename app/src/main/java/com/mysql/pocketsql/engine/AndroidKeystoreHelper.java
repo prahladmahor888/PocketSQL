@@ -7,26 +7,29 @@ import javax.crypto.KeyGenerator;
 import javax.crypto.SecretKey;
 
 public class AndroidKeystoreHelper {
-    private static final String ALIAS = "PocketSQLAESKeyAlias";
 
     public static SecretKey getOrCreateKey() throws Exception {
-        KeyStore keyStore = KeyStore.getInstance("AndroidKeyStore");
+        String provider = SqlEnvConfig.getKeystoreProvider();
+        String alias = SqlEnvConfig.getKeystoreKeyAlias();
+        int keySize = SqlEnvConfig.getKeystoreAesKeySize();
+
+        KeyStore keyStore = KeyStore.getInstance(provider);
         keyStore.load(null);
-        if (!keyStore.containsAlias(ALIAS)) {
+        if (!keyStore.containsAlias(alias)) {
             KeyGenerator keyGenerator = KeyGenerator.getInstance(
-                KeyProperties.KEY_ALGORITHM_AES, "AndroidKeyStore");
+                KeyProperties.KEY_ALGORITHM_AES, provider);
             
             KeyGenParameterSpec keyGenParameterSpec = new KeyGenParameterSpec.Builder(
-                ALIAS,
+                alias,
                 KeyProperties.PURPOSE_ENCRYPT | KeyProperties.PURPOSE_DECRYPT)
                 .setBlockModes(KeyProperties.BLOCK_MODE_GCM)
                 .setEncryptionPaddings(KeyProperties.ENCRYPTION_PADDING_NONE)
-                .setKeySize(256)
+                .setKeySize(keySize > 0 ? keySize : 256)
                 .build();
             
             keyGenerator.init(keyGenParameterSpec);
             keyGenerator.generateKey();
         }
-        return (SecretKey) keyStore.getKey(ALIAS, null);
+        return (SecretKey) keyStore.getKey(alias, null);
     }
 }

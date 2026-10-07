@@ -8,26 +8,33 @@ import java.security.PrivateKey;
 import java.security.cert.Certificate;
 import java.math.BigInteger;
 import java.util.Calendar;
+import javax.security.auth.x500.X500Principal;
 
 public class AndroidCertGenerator implements CertGenerator {
     @Override
     public CertificateAndKey generate() throws Exception {
-        KeyStore keyStore = KeyStore.getInstance("AndroidKeyStore");
+        String provider = SqlEnvConfig.getKeystoreProvider();
+        String alias = SqlEnvConfig.getKeystoreTlsCertAlias();
+        int rsaKeySize = SqlEnvConfig.getKeystoreRsaKeySize();
+        String subject = SqlEnvConfig.getKeystoreCertSubject();
+        int validityYears = SqlEnvConfig.getKeystoreCertValidityYears();
+
+        KeyStore keyStore = KeyStore.getInstance(provider);
         keyStore.load(null);
         
-        String alias = "psql_entry";
         if (!keyStore.containsAlias(alias)) {
             KeyPairGenerator kpg = KeyPairGenerator.getInstance(
-                KeyProperties.KEY_ALGORITHM_RSA, "AndroidKeyStore");
+                KeyProperties.KEY_ALGORITHM_RSA, provider);
             
             Calendar start = Calendar.getInstance();
             Calendar end = Calendar.getInstance();
-            end.add(Calendar.YEAR, 1);
+            end.add(Calendar.YEAR, validityYears > 0 ? validityYears : 1);
             
             KeyGenParameterSpec spec = new KeyGenParameterSpec.Builder(
                 alias,
                 KeyProperties.PURPOSE_SIGN | KeyProperties.PURPOSE_DECRYPT)
-                .setCertificateSubject(new javax.security.auth.x500.X500Principal("CN=localhost, O=PocketSQL, C=US"))
+                .setKeySize(rsaKeySize > 0 ? rsaKeySize : 2048)
+                .setCertificateSubject(new X500Principal(subject != null && !subject.isEmpty() ? subject : "CN=localhost, O=PocketSQL, C=US"))
                 .setCertificateSerialNumber(BigInteger.valueOf(System.currentTimeMillis()))
                 .setCertificateNotBefore(start.getTime())
                 .setCertificateNotAfter(end.getTime())

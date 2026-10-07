@@ -18,6 +18,7 @@ public class SettingsManager {
     public static final String KEY_LINE_SPACING  = "line_spacing";
     public static final String KEY_PROMPT_STYLE  = "prompt_style";
     public static final String KEY_AUTO_SCROLL   = "auto_scroll";
+    public static final String KEY_SETUP_COMPLETED = "setup_completed";
 
     // ── Theme constants ────────────────────────────────────────────────────────
     public static final int THEME_CLASSIC = 0;  // Black / White
@@ -442,5 +443,13 @@ public class SettingsManager {
         } catch (Exception e) {
             com.mysql.pocketsql.engine.SqlLog.printStackTrace(e);
         }
+    }
+
+    public boolean isSetupCompleted() {
+        return prefs.getBoolean(KEY_SETUP_COMPLETED, false);
+    }
+
+    public void setSetupCompleted(boolean completed) {
+        prefs.edit().putBoolean(KEY_SETUP_COMPLETED, completed).apply();
     }
 }

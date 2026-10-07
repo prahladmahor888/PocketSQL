@@ -49,6 +49,19 @@ public class DatabaseEngine {
     public long totalExecutionTimeMs = 0L;
     private final long startTimeMs = System.currentTimeMillis();
 
+    public interface RowProgressListener {
+        void onRowInserted(String databaseName, String tableName, int currentRow, int totalRowsInBatch);
+    }
+    private RowProgressListener rowProgressListener = null;
+
+    public void setRowProgressListener(RowProgressListener listener) {
+        this.rowProgressListener = listener;
+    }
+
+    public RowProgressListener getRowProgressListener() {
+        return this.rowProgressListener;
+    }
+
     final SqlPrivilegeManager privilegeManager;
     final SqlTransactionManager transactionManager;
     final SqlDatabaseManager databaseManager;
@@ -2257,7 +2270,11 @@ public class DatabaseEngine {
         TableData td = getOrLoadTable(tableName);
 
         int affected = 0;
+        int totalRowsInBatch = valuesList.size();
+        int currentRowIndex = 0;
+
         for (List<Object> values : valuesList) {
+            currentRowIndex++;
             Map<String, Object> newRow = new HashMap<>();
 
             try {
@@ -2376,6 +2393,12 @@ public class DatabaseEngine {
                     validateRowConstraints(tableName, newRow, td, null);
                     td.rows.add(newRow);
                     affected++;
+                }
+
+                if (rowProgressListener != null && (currentRowIndex % 5 == 0 || currentRowIndex == totalRowsInBatch)) {
+                    try {
+                        rowProgressListener.onRowInserted(activeDatabaseName, tableName, currentRowIndex, totalRowsInBatch);
+                    } catch (Throwable ignored) {}
                 }
             } catch (Exception ex) {
                 if (ignore) {

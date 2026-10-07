@@ -46,7 +46,8 @@ public class SecurityHelper {
         if (plainText == null) return null;
         SecretKey keySpec = getSecretKey();
         
-        Cipher cipher = Cipher.getInstance("AES/GCM/NoPadding");
+        String cipherName = SqlEnvConfig.getKeystoreEncryptionCipher();
+        Cipher cipher = Cipher.getInstance(cipherName != null ? cipherName : "AES/GCM/NoPadding");
         cipher.init(Cipher.ENCRYPT_MODE, keySpec);
         byte[] iv = cipher.getIV();
         if (iv == null || iv.length == 0) {
@@ -82,7 +83,8 @@ public class SecurityHelper {
             System.arraycopy(decodedBytes, GCM_IV_LENGTH, ciphertext, 0, ciphertext.length);
 
             SecretKey keySpec = getSecretKey();
-            Cipher cipher = Cipher.getInstance("AES/GCM/NoPadding");
+            String cipherName = SqlEnvConfig.getKeystoreEncryptionCipher();
+            Cipher cipher = Cipher.getInstance(cipherName != null ? cipherName : "AES/GCM/NoPadding");
             GCMParameterSpec gcmSpec = new GCMParameterSpec(GCM_TAG_LENGTH, iv);
             cipher.init(Cipher.DECRYPT_MODE, keySpec, gcmSpec);
             byte[] decryptedBytes = cipher.doFinal(ciphertext);

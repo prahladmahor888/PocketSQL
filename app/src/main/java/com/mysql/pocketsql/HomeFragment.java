@@ -83,6 +83,7 @@ public class HomeFragment extends Fragment {
     private int historyIndex = -1;
     private final StringBuilder multiLineBuffer = new StringBuilder();
     private String currentDelimiter = ";";
+    private final java.util.concurrent.atomic.AtomicLong suggestionReqId = new java.util.concurrent.atomic.AtomicLong(0);
 
     private String selectedExportFormat = "db";
 
@@ -1229,6 +1230,11 @@ public class HomeFragment extends Fragment {
         if (loginState == LOGIN_STATE_AUTHENTICATED) {
             refreshTerminalPrompt();
         }
+
+        // Seamlessly adapt system status bar, navigation bar, and root container to active theme color
+        if (getActivity() instanceof MainActivity) {
+            ((MainActivity) getActivity()).updateSystemBarsAndTheme(bgColor);
+        }
     }
 
     private void showSettingsDialog() {
@@ -1672,223 +1678,242 @@ public class HomeFragment extends Fragment {
     }
 
     private void updateSuggestions(String text, int pos) {
-        try {
-            if (loginState != LOGIN_STATE_AUTHENTICATED) {
-                suggestionsBar.setVisibility(View.GONE);
-                return;
-            }
+        if (loginState != LOGIN_STATE_AUTHENTICATED) {
+            suggestionsBar.setVisibility(View.GONE);
+            return;
+        }
 
-            String word = getCurrentWord(text, pos);
-            if (word.isEmpty()) {
-                suggestionsBar.setVisibility(View.GONE);
-                return;
-            }
+        String word = getCurrentWord(text, pos);
+        if (word.isEmpty()) {
+            suggestionsBar.setVisibility(View.GONE);
+            return;
+        }
 
-            List<String> matches = new ArrayList<>();
-            String wordLower = word.toLowerCase();
+        final long currentReq = suggestionReqId.incrementAndGet();
+        final String wordFinal = word;
+        final String textFinal = text;
 
-            if (word.contains(".")) {
-                int dotIndex = word.indexOf('.');
-                String tableNameOrAlias = word.substring(0, dotIndex);
-                String colPrefix = word.substring(dotIndex + 1).toLowerCase();
+        com.mysql.pocketsql.engine.SqlThreadScheduler.runBackgroundTask(() -> {
+            try {
+                if (currentReq != suggestionReqId.get() || engine == null) return;
 
-                // Retrieve full SQL context by combining multiLineBuffer and current text
-                String fullSqlContext = multiLineBuffer.toString();
-                if (fullSqlContext.length() > 0) {
-                    fullSqlContext += "\n";
-                }
-                fullSqlContext += text;
+                List<String> matches = new ArrayList<>();
+                String wordLower = wordFinal.toLowerCase();
 
-                java.util.Map<String, String> aliases = com.mysql.pocketsql.engine.SqlAliasExtractor.extractAliases(fullSqlContext);
-                String realTableName = tableNameOrAlias;
-                List<String> allTables = engine.getTablesList();
+                if (wordFinal.contains(".")) {
+                    int dotIndex = wordFinal.indexOf('.');
+                    String tableNameOrAlias = wordFinal.substring(0, dotIndex);
+                    String colPrefix = wordFinal.substring(dotIndex + 1).toLowerCase();
 
-                if (aliases.containsKey(tableNameOrAlias.toLowerCase())) {
-                    realTableName = aliases.get(tableNameOrAlias.toLowerCase());
-                } else {
-                    // Fallback: search for a table name that matches tableNameOrAlias
-                    String lowerAlias = tableNameOrAlias.toLowerCase();
-                    String bestMatch = null;
+                    // Retrieve full SQL context by combining multiLineBuffer and current text
+                    String fullSqlContext = multiLineBuffer.toString();
+                    if (fullSqlContext.length() > 0) {
+                        fullSqlContext += "\n";
+                    }
+                    fullSqlContext += textFinal;
+
+                    java.util.Map<String, String> aliases = com.mysql.pocketsql.engine.SqlAliasExtractor.extractAliases(fullSqlContext);
+                    String realTableName = tableNameOrAlias;
+                    List<String> allTables = engine.getTablesList();
+
+                    if (aliases.containsKey(tableNameOrAlias.toLowerCase())) {
+                        realTableName = aliases.get(tableNameOrAlias.toLowerCase());
+                    } else {
+                        // Fallback: search for a table name that matches tableNameOrAlias
+                        String lowerAlias = tableNameOrAlias.toLowerCase();
+                        String bestMatch = null;
+                        for (String t : allTables) {
+                            if (t.toLowerCase().equals(lowerAlias)) {
+                                bestMatch = t;
+                                break;
+                            }
+                        }
+                        if (bestMatch == null) {
+                            for (String t : allTables) {
+                                if (t.toLowerCase().startsWith(lowerAlias)) {
+                                    bestMatch = t;
+                                    break;
+                                }
+                            }
+                        }
+                        if (bestMatch == null) {
+                            for (String t : allTables) {
+                                if (matchInitials(t, lowerAlias)) {
+                                    bestMatch = t;
+                                    break;
+                                }
+                            }
+                        }
+                        if (bestMatch != null) {
+                            realTableName = bestMatch;
+                        }
+                    }
+
+                    boolean tableExists = false;
+                    String exactTableName = realTableName;
                     for (String t : allTables) {
-                        if (t.toLowerCase().equals(lowerAlias)) {
-                            bestMatch = t;
+                        if (t.equalsIgnoreCase(realTableName)) {
+                            tableExists = true;
+                            exactTableName = t;
                             break;
                         }
                     }
-                    if (bestMatch == null) {
-                        for (String t : allTables) {
-                            if (t.toLowerCase().startsWith(lowerAlias)) {
-                                bestMatch = t;
-                                break;
-                            }
-                        }
-                    }
-                    if (bestMatch == null) {
-                        for (String t : allTables) {
-                            if (matchInitials(t, lowerAlias)) {
-                                bestMatch = t;
-                                break;
-                            }
-                        }
-                    }
-                    if (bestMatch != null) {
-                        realTableName = bestMatch;
-                    }
-                }
 
-                boolean tableExists = false;
-                String exactTableName = realTableName;
-                for (String t : allTables) {
-                    if (t.equalsIgnoreCase(realTableName)) {
-                        tableExists = true;
-                        exactTableName = t;
-                        break;
-                    }
-                }
-
-                if (tableExists) {
-                    List<String> cols = engine.getColumnsList(exactTableName);
-                    for (String col : cols) {
-                        if (col.toLowerCase().startsWith(colPrefix)) {
-                            matches.add(tableNameOrAlias + "." + col);
-                        }
-                    }
-                } else {
-                    // Fallback: if table is not resolved (alias not defined yet and doesn't match any table prefix/initials),
-                    // suggest columns from ALL tables in the database.
-                    for (String t : allTables) {
-                        List<String> cols = engine.getColumnsList(t);
+                    if (tableExists) {
+                        List<String> cols = engine.getColumnsList(exactTableName);
                         for (String col : cols) {
                             if (col.toLowerCase().startsWith(colPrefix)) {
-                                String suggestion = tableNameOrAlias + "." + col;
-                                if (!matches.contains(suggestion)) {
-                                    matches.add(suggestion);
+                                matches.add(tableNameOrAlias + "." + col);
+                            }
+                        }
+                    } else {
+                        // Fallback: if table is not resolved (alias not defined yet and doesn't match any table prefix/initials),
+                        // suggest columns from ALL tables in the database.
+                        for (String t : allTables) {
+                            List<String> cols = engine.getColumnsList(t);
+                            for (String col : cols) {
+                                if (col.toLowerCase().startsWith(colPrefix)) {
+                                    String suggestion = tableNameOrAlias + "." + col;
+                                    if (!matches.contains(suggestion)) {
+                                        matches.add(suggestion);
+                                    }
                                 }
                             }
                         }
                     }
-                }
-            } else {
-                // Keywords
-                matches.addAll(com.mysql.pocketsql.engine.SqlKeywordSuggester.suggest(wordLower));
+                } else {
+                    // Keywords
+                    matches.addAll(com.mysql.pocketsql.engine.SqlKeywordSuggester.suggest(wordLower));
 
-                // Tables
-                List<String> tables = engine.getTablesList();
-                for (String t : tables) {
-                    if (t.toLowerCase().startsWith(wordLower)) {
-                        matches.add(t);
+                    // Tables
+                    List<String> tables = engine.getTablesList();
+                    for (String t : tables) {
+                        if (t.toLowerCase().startsWith(wordLower)) {
+                            matches.add(t);
+                        }
                     }
-                }
 
-                // Columns (all columns from active tables matching prefix)
-                for (String t : tables) {
-                    List<String> cols = engine.getColumnsList(t);
-                    for (String col : cols) {
-                        if (col.toLowerCase().startsWith(wordLower) && !matches.contains(col)) {
-                            matches.add(col);
+                    // Columns (all columns from active tables matching prefix)
+                    for (String t : tables) {
+                        List<String> cols = engine.getColumnsList(t);
+                        for (String col : cols) {
+                            if (col.toLowerCase().startsWith(wordLower) && !matches.contains(col)) {
+                                matches.add(col);
+                            }
+                        }
+                    }
+
+                    // Databases
+                    List<String> dbs = engine.getDatabasesList();
+                    for (String db : dbs) {
+                        if (db.toLowerCase().startsWith(wordLower) && !matches.contains(db)) {
+                            matches.add(db);
+                        }
+                    }
+
+                    // Procedures
+                    List<String> procs = engine.getProceduresList();
+                    for (String p : procs) {
+                        if (p.toLowerCase().startsWith(wordLower) && !matches.contains(p)) {
+                            matches.add(p);
+                        }
+                    }
+
+                    // Triggers
+                    List<String> triggers = engine.getTriggersList();
+                    for (String tg : triggers) {
+                        if (tg.toLowerCase().startsWith(wordLower) && !matches.contains(tg)) {
+                            matches.add(tg);
+                        }
+                    }
+
+                    // Events
+                    List<String> events = engine.getEventsList();
+                    for (String ev : events) {
+                        if (ev.toLowerCase().startsWith(wordLower) && !matches.contains(ev)) {
+                            matches.add(ev);
+                        }
+                    }
+
+                    // Custom Functions
+                    List<String> fns = engine.getCustomFunctionsList();
+                    for (String fn : fns) {
+                        String fnWithParens = fn + "()";
+                        if (fnWithParens.toLowerCase().startsWith(wordLower) && !matches.contains(fnWithParens)) {
+                            matches.add(fnWithParens);
+                        }
+                    }
+
+                    // Constraints
+                    List<String> constraints = engine.getConstraintsList();
+                    for (String cn : constraints) {
+                        if (cn.toLowerCase().startsWith(wordLower) && !matches.contains(cn)) {
+                            matches.add(cn);
+                        }
+                    }
+
+                    // Indexes
+                    List<String> indexes = engine.getIndexesList();
+                    for (String idx : indexes) {
+                        if (idx.toLowerCase().startsWith(wordLower) && !matches.contains(idx)) {
+                            matches.add(idx);
                         }
                     }
                 }
 
-                // Databases
-                List<String> dbs = engine.getDatabasesList();
-                for (String db : dbs) {
-                    if (db.toLowerCase().startsWith(wordLower) && !matches.contains(db)) {
-                        matches.add(db);
-                    }
-                }
+                if (currentReq != suggestionReqId.get()) return;
 
-                // Procedures
-                List<String> procs = engine.getProceduresList();
-                for (String p : procs) {
-                    if (p.toLowerCase().startsWith(wordLower) && !matches.contains(p)) {
-                        matches.add(p);
-                    }
-                }
+                com.mysql.pocketsql.engine.SqlThreadScheduler.runOnMainThread(() -> {
+                    if (currentReq != suggestionReqId.get() || !isAdded() || getContext() == null) return;
 
-                // Triggers
-                List<String> triggers = engine.getTriggersList();
-                for (String tg : triggers) {
-                    if (tg.toLowerCase().startsWith(wordLower) && !matches.contains(tg)) {
-                        matches.add(tg);
+                    suggestionsContainer.removeAllViews();
+                    if (matches.isEmpty()) {
+                        suggestionsBar.setVisibility(View.GONE);
+                        return;
                     }
-                }
 
-                // Events
-                List<String> events = engine.getEventsList();
-                for (String ev : events) {
-                    if (ev.toLowerCase().startsWith(wordLower) && !matches.contains(ev)) {
-                        matches.add(ev);
-                    }
-                }
+                    int dp6 = dpToPx(6);
+                    int dp12 = dpToPx(12);
 
-                // Custom Functions
-                List<String> fns = engine.getCustomFunctionsList();
-                for (String fn : fns) {
-                    String fnWithParens = fn + "()";
-                    if (fnWithParens.toLowerCase().startsWith(wordLower) && !matches.contains(fnWithParens)) {
-                        matches.add(fnWithParens);
-                    }
-                }
+                    for (final String match : matches) {
+                        TextView chip = new TextView(requireContext());
+                        chip.setText(match);
+                        chip.setTextColor(Color.parseColor("#00E5FF")); // Cyan text
+                        chip.setTextSize(TypedValue.COMPLEX_UNIT_SP, 13);
+                        chip.setTypeface(Typeface.MONOSPACE, Typeface.BOLD);
+                        chip.setPadding(dp12, dp6, dp12, dp6);
+                        chip.setBackgroundResource(R.drawable.suggestion_chip_bg);
+                        chip.setClickable(true);
+                        chip.setFocusable(true);
 
-                // Constraints
-                List<String> constraints = engine.getConstraintsList();
-                for (String cn : constraints) {
-                    if (cn.toLowerCase().startsWith(wordLower) && !matches.contains(cn)) {
-                        matches.add(cn);
-                    }
-                }
+                        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
+                            LinearLayout.LayoutParams.WRAP_CONTENT,
+                            LinearLayout.LayoutParams.WRAP_CONTENT
+                        );
+                        lp.setMarginEnd(dp12);
+                        chip.setLayoutParams(lp);
 
-                // Indexes
-                List<String> indexes = engine.getIndexesList();
-                for (String idx : indexes) {
-                    if (idx.toLowerCase().startsWith(wordLower) && !matches.contains(idx)) {
-                        matches.add(idx);
+                        final String wordToReplace = wordFinal;
+                        chip.setOnClickListener(v -> applySuggestion(wordToReplace, match));
+
+                        suggestionsContainer.addView(chip);
                     }
-                }
+
+                    if (settings != null) {
+                        settings.applyFontToViewTree(suggestionsContainer);
+                    }
+                    suggestionsBar.setVisibility(View.VISIBLE);
+                });
+
+            } catch (Throwable t) {
+                com.mysql.pocketsql.engine.SqlLog.e("PocketSQL", "Error in updateSuggestions", t);
+                com.mysql.pocketsql.engine.SqlThreadScheduler.runOnMainThread(() -> {
+                    if (suggestionsBar != null) {
+                        suggestionsBar.setVisibility(View.GONE);
+                    }
+                });
             }
-
-            suggestionsContainer.removeAllViews();
-            if (matches.isEmpty()) {
-                suggestionsBar.setVisibility(View.GONE);
-                return;
-            }
-
-            int dp6 = dpToPx(6);
-            int dp12 = dpToPx(12);
-
-            for (final String match : matches) {
-                TextView chip = new TextView(requireContext());
-                chip.setText(match);
-                chip.setTextColor(Color.parseColor("#00E5FF")); // Cyan text
-                chip.setTextSize(TypedValue.COMPLEX_UNIT_SP, 13);
-                chip.setTypeface(Typeface.MONOSPACE, Typeface.BOLD);
-                chip.setPadding(dp12, dp6, dp12, dp6);
-                chip.setBackgroundResource(R.drawable.suggestion_chip_bg);
-                chip.setClickable(true);
-                chip.setFocusable(true);
-
-                LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
-                    LinearLayout.LayoutParams.WRAP_CONTENT,
-                    LinearLayout.LayoutParams.WRAP_CONTENT
-                );
-                lp.setMarginEnd(dp12);
-                chip.setLayoutParams(lp);
-
-                final String wordToReplace = word;
-                chip.setOnClickListener(v -> applySuggestion(wordToReplace, match));
-
-                suggestionsContainer.addView(chip);
-            }
-
-            settings.applyFontToViewTree(suggestionsContainer);
-            suggestionsBar.setVisibility(View.VISIBLE);
-        } catch (Throwable t) {
-            com.mysql.pocketsql.engine.SqlLog.e("PocketSQL", "Error in updateSuggestions", t);
-            try {
-                suggestionsBar.setVisibility(View.GONE);
-            } catch (Throwable ignored) {}
-        }
+        });
     }
 
     private String getCurrentWord(String text, int pos) {
@@ -2119,12 +2144,12 @@ public class HomeFragment extends Fragment {
             final String promptTxt = tvTerminalPrompt.getText().toString();
             final String[] lines = rawInput.split("\n", -1);
 
-            new Thread(new Runnable() {
+            com.mysql.pocketsql.engine.SqlThreadScheduler.runQueryTask(new Runnable() {
                 @Override
                 public void run() {
                     processQueriesBackground(lines, promptTxt);
                 }
-            }).start();
+            });
         }
     }
 

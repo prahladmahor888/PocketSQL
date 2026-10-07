@@ -33,6 +33,9 @@ Thumbs.db
 *.keystore
 *.p12
 
+.env
+
+
 # Secrets, Credentials, and API keys
 google-services.json
 secrets.properties

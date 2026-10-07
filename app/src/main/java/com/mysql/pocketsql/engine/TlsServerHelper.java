@@ -30,10 +30,12 @@ public class TlsServerHelper {
         secureRandom.nextBytes(passwordBytes);
         char[] password = java.util.Base64.getEncoder().encodeToString(passwordBytes).toCharArray();
 
+        String entryAlias = SqlEnvConfig.getKeystoreTlsCertAlias();
+
         // Setup Keystore
         KeyStore keyStore = KeyStore.getInstance(KeyStore.getDefaultType());
         keyStore.load(null, null);
-        keyStore.setKeyEntry("psql_entry", certAndKey.privateKey, password, 
+        keyStore.setKeyEntry(entryAlias != null ? entryAlias : "psql_entry", certAndKey.privateKey, password, 
             new Certificate[]{certAndKey.certificate});
 
         // Setup KeyManagerFactory
