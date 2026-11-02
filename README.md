@@ -93,7 +93,20 @@ PocketSQL exposes a secure HTTP API endpoint to act as a database backend for ex
 * If port `8080` is already in use by another app on the Android device, the server will scan ports sequentially up to **`8099`** and bind to the first available port.
 * The active port is dynamically displayed in the **🔑 API Keys** dialog and in the background notification.
 
-### Remote Network Connections
+### Remote Network Connections & Global Internet Access
+* **Local Access (Same Device)**: For client apps running on the same device (e.g., local webviews, scripts, or apps):
+  `http://localhost:<active_port>/api/query`
+* **Local Network (Wi-Fi / LAN)**: For systems on the same local network:
+  `http://<mobile_ip>:<active_port>/api/query` (e.g., `http://192.168.1.15:8080/api/query`).
+* **🌐 Global Internet Access (Worldwide Remote Connectivity)**:
+  Allows **anyone in the world** to execute queries against your embedded database from any external server, cloud function, web application, or machine:
+  * **Without Custom Domain (Auto Public Tunnel)**:
+    Instant, zero-configuration global HTTPS tunnel (e.g., `https://<random-id>.loca.lt/api/query`). Tap **ENABLE GLOBAL** and copy your URL!
+  * **With Custom Subdomain**:
+    Pick a preferred fixed name on the public gateway (e.g., `https://pocketsql-team.loca.lt/api/query`).
+  * **With Custom Domain**:
+    Use your own brand/company domain (e.g., `https://api.mycustomdomain.com/api/query`) by adding a CNAME DNS record pointing to your tunnel subdomain, or point to your own self-hosted reverse proxy/tunnel gateway.
+  * **Live Diagnostics**: Tap **🧪 Test** in the API Keys dialog to execute an end-to-end ping test and verify global reachability and latency.
 * **Local Access**: For client apps running on the same device (e.g., local webviews or apps):
   `http://localhost:<active_port>/api/query`
 * **Remote Access (Other Systems)**: For client apps running on another computer, server, or mobile device on the same local network:

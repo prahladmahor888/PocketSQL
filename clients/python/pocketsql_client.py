@@ -2,13 +2,19 @@ import requests
 import json
 from tabulate import tabulate
 
+# PocketSQL Remote Connection URL:
+# 1. Local device (same phone/emulator): "http://localhost:8080/api/query"
+# 2. Local Wi-Fi Network (LAN):          "http://192.168.1.15:8080/api/query"
+# 3. Global Public Tunnel (Zero Setup):  "https://<subdomain>.loca.lt/api/query"
+# 4. Custom Domain / Server:             "https://api.yourcustomdomain.com/api/query"
 BASE_URL = "http://<mobile_ip>:<active_port>/api/query"
 API_KEY = "<your_api_key>"
 DATABASE = "ecommerce"
 
 HEADERS = {
     "Authorization": f"Bearer {API_KEY}",
-    "Content-Type": "application/json"
+    "Content-Type": "application/json",
+    "Bypass-Tunnel-Reminder": "true"
 }
 
 def run_sql(sql):
@@ -20,7 +26,7 @@ def run_sql(sql):
 
     try:
         payload = {"sql": sql, "database": DATABASE}
-        response = requests.post(BASE_URL, json=payload, headers=HEADERS, timeout=10)
+        response = requests.post(BASE_URL, json=payload, headers=HEADERS, timeout=15)
 
         try:
             response.raise_for_status()
@@ -47,8 +53,8 @@ def run_sql(sql):
                 print(f"\n{len(rows)} rows in set ({exec_time:.2f} sec)")
             else:
                 print("Query OK")
-                if "affected_rows" in data:
-                    print(f"{data['affected_rows']} rows affected")
+                if "affectedRows" in data:
+                    print(f"{data['affectedRows']} rows affected")
         else:
             print("ERROR:")
             print(data.get("error") or data.get("message") or json.dumps(data))

@@ -6,6 +6,7 @@ import java.util.*;
 
 public class PocketSQL {
 
+    // Remote Connection URL (Supports Local, Wi-Fi LAN, Global Public Tunnel, or Custom Domain)
     static final String BASE_URL = System.getenv("POCKETSQL_URL") != null ? System.getenv("POCKETSQL_URL") : "http://<mobile_ip>:<active_port>/api/query";
     static final String API_KEY = System.getenv("POCKETSQL_API_KEY") != null ? System.getenv("POCKETSQL_API_KEY") : "<your_api_key>";
     static final String DATABASE = System.getenv("POCKETSQL_DATABASE") != null ? System.getenv("POCKETSQL_DATABASE") : "<your_database_name>";
@@ -124,6 +125,7 @@ public class PocketSQL {
                 .uri(URI.create(BASE_URL))
                 .header("Authorization", "Bearer " + API_KEY)
                 .header("Content-Type", "application/json")
+                .header("Bypass-Tunnel-Reminder", "true")
                 .POST(HttpRequest.BodyPublishers.ofString(payload))
                 .timeout(java.time.Duration.ofSeconds(10))
                 .build();

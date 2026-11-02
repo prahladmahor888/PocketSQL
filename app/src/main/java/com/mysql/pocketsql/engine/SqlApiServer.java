@@ -109,7 +109,20 @@ public class SqlApiServer {
     private void handleClient(Socket socket) {
         try (InputStream is = socket.getInputStream();
              OutputStream os = socket.getOutputStream()) {
+            handleHttpRequest(is, os);
+        } catch (Exception e) {
+            com.mysql.pocketsql.engine.SqlLog.printStackTrace(e);
+        } finally {
+            try {
+                socket.close();
+            } catch (Exception e) {
+                // Ignore
+            }
+        }
+    }
 
+    public void handleHttpRequest(InputStream is, OutputStream os) {
+        try {
             // Read HTTP request line
             String requestLine = readLine(is);
             if (requestLine == null || requestLine.trim().isEmpty()) {
@@ -139,6 +152,12 @@ public class SqlApiServer {
             // CORS Preflight Options check
             if ("OPTIONS".equalsIgnoreCase(method)) {
                 sendResponse(os, 204, "No Content", "");
+                return;
+            }
+
+            // Health check and root status endpoint (supports global tunnel testing)
+            if ("/api/ping".equals(path) || "/ping".equals(path) || "/".equals(path)) {
+                sendResponse(os, 200, "OK", "{\"success\":true,\"message\":\"PocketSQL API Server is Online\",\"version\":\"1.0.5\"}");
                 return;
             }
 
@@ -242,7 +261,6 @@ public class SqlApiServer {
                     }
                 }
 
-
                 JSONObject resObj = toJSON(result);
                 sendResponse(os, 200, "OK", resObj.toString());
             } catch (Exception e) {
@@ -251,14 +269,9 @@ public class SqlApiServer {
 
         } catch (Exception e) {
             com.mysql.pocketsql.engine.SqlLog.printStackTrace(e);
-        } finally {
-            try {
-                socket.close();
-            } catch (Exception e) {
-                // Ignore
-            }
         }
     }
+
 
     private String readLine(InputStream is) throws Exception {
         ByteArrayOutputStream bos = new ByteArrayOutputStream();

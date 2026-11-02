@@ -20,6 +20,18 @@ public class SettingsManager {
     public static final String KEY_AUTO_SCROLL   = "auto_scroll";
     public static final String KEY_SETUP_COMPLETED = "setup_completed";
 
+    // ── Global Tunnel & Public Access ──────────────────────────────────────────
+    public static final String KEY_GLOBAL_ACCESS_ENABLED  = "global_access_enabled";
+    public static final String KEY_GLOBAL_TUNNEL_MODE     = "global_tunnel_mode";
+    public static final String KEY_GLOBAL_CUSTOM_DOMAIN   = "global_custom_domain";
+    public static final String KEY_GLOBAL_CUSTOM_SERVER   = "global_custom_server";
+    public static final String KEY_GLOBAL_CUSTOM_SUBDOMAIN = "global_custom_subdomain";
+    public static final String KEY_GLOBAL_LAST_PUBLIC_URL = "global_last_public_url";
+
+    public static final int TUNNEL_MODE_AUTO_PUBLIC      = 0; // Without custom domain (Instant public tunnel)
+    public static final int TUNNEL_MODE_CUSTOM_SUBDOMAIN = 1; // Custom subdomain on public gateway
+    public static final int TUNNEL_MODE_CUSTOM_DOMAIN    = 2; // With custom domain / self-hosted server
+
     // ── Theme constants ────────────────────────────────────────────────────────
     public static final int THEME_CLASSIC = 0;  // Black / White
     public static final int THEME_MATRIX  = 1;  // Black / Green
@@ -451,5 +463,65 @@ public class SettingsManager {
 
     public void setSetupCompleted(boolean completed) {
         prefs.edit().putBoolean(KEY_SETUP_COMPLETED, completed).apply();
+    }
+
+    // ── Global Access & Domain ────────────────────────────────────────────────
+
+    public boolean isGlobalAccessEnabled() {
+        return prefs.getBoolean(KEY_GLOBAL_ACCESS_ENABLED, false);
+    }
+
+    public void setGlobalAccessEnabled(boolean enabled) {
+        prefs.edit().putBoolean(KEY_GLOBAL_ACCESS_ENABLED, enabled).apply();
+    }
+
+    public int getGlobalTunnelMode() {
+        return prefs.getInt(KEY_GLOBAL_TUNNEL_MODE, TUNNEL_MODE_AUTO_PUBLIC);
+    }
+
+    public void setGlobalTunnelMode(int mode) {
+        prefs.edit().putInt(KEY_GLOBAL_TUNNEL_MODE, mode).apply();
+    }
+
+    public String getGlobalCustomDomain() {
+        return prefs.getString(KEY_GLOBAL_CUSTOM_DOMAIN, "");
+    }
+
+    public void setGlobalCustomDomain(String domain) {
+        prefs.edit().putString(KEY_GLOBAL_CUSTOM_DOMAIN, domain != null ? domain.trim() : "").apply();
+    }
+
+    public String getGlobalCustomServer() {
+        return prefs.getString(KEY_GLOBAL_CUSTOM_SERVER, "https://loca.lt");
+    }
+
+    public void setGlobalCustomServer(String server) {
+        prefs.edit().putString(KEY_GLOBAL_CUSTOM_SERVER, server != null ? server.trim() : "https://loca.lt").apply();
+    }
+
+    public String getGlobalCustomSubdomain() {
+        return prefs.getString(KEY_GLOBAL_CUSTOM_SUBDOMAIN, "");
+    }
+
+    public void setGlobalCustomSubdomain(String subdomain) {
+        prefs.edit().putString(KEY_GLOBAL_CUSTOM_SUBDOMAIN, subdomain != null ? subdomain.trim() : "").apply();
+    }
+
+    public String getGlobalLastPublicUrl() {
+        return prefs.getString(KEY_GLOBAL_LAST_PUBLIC_URL, "");
+    }
+
+    public void setGlobalLastPublicUrl(String url) {
+        prefs.edit().putString(KEY_GLOBAL_LAST_PUBLIC_URL, url != null ? url.trim() : "").apply();
+    }
+
+    public static final String KEY_DEFAULT_DATABASE = "default_database";
+
+    public String getDefaultDatabase() {
+        return prefs.getString(KEY_DEFAULT_DATABASE, "ecommerce");
+    }
+
+    public void setDefaultDatabase(String dbName) {
+        prefs.edit().putString(KEY_DEFAULT_DATABASE, dbName != null && !dbName.trim().isEmpty() ? dbName.trim() : "ecommerce").apply();
     }
 }

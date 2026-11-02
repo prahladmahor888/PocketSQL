@@ -1,3 +1,8 @@
+// PocketSQL Remote Connection URL:
+// 1. Local device:            "http://localhost:8080/api/query"
+// 2. Local Wi-Fi (LAN):       "http://192.168.1.15:8080/api/query"
+// 3. Global Public Tunnel:    "https://<subdomain>.loca.lt/api/query"
+// 4. Custom Domain / Server:  "https://api.yourcustomdomain.com/api/query"
 const BASE_URL = 'http://<mobile_ip>:<active_port>/api/query';
 const API_KEY = '<your_api_key>';
 const DATABASE = 'ecommerce';
@@ -16,7 +21,8 @@ function runSql(sql) {
     method: 'POST',
     headers: {
       'Authorization': `Bearer ${API_KEY}`,
-      'Content-Type': 'application/json'
+      'Content-Type': 'application/json',
+      'Bypass-Tunnel-Reminder': 'true'
     },
     body: payload
   })

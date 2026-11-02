@@ -54,6 +54,7 @@
     <string name="subtitle_autoscroll">Scroll to bottom after each query</string>
 
     <string name="section_db_utilities">DATABASE UTILITIES</string>
+    <string name="btn_manage_databases">🗄 Configure &amp; Install Databases</string>
     <string name="btn_export_db">Export Active DB</string>
     <string name="btn_import_db">Import DB</string>
     <string name="btn_cancel">Cancel</string>
@@ -97,4 +98,12 @@
     <string name="toast_conn_saved">Connection saved!</string>
     <string name="integrity_tamper_warning">CRITICAL: Binary signature tampered! App compromised!</string>
     <string name="integrity_signature_error">CRITICAL: Signature verification failure!</string>
+
+    <!-- Global Access / Tunnel Strings -->
+    <string name="toast_global_url_copied">Global API URL copied!</string>
+    <string name="toast_global_enabled">Global Internet Access enabled</string>
+    <string name="toast_global_disabled">Global Internet Access disabled</string>
+    <string name="toast_domain_saved">Global tunnel settings saved &amp; applied</string>
+    <string name="toast_dns_copied">DNS Record copied! Add it to Cloudflare / GoDaddy / Namecheap.</string>
+    <string name="dialog_global_config_title">⚙ Global Access &amp; Domain Settings</string>
 </resources>

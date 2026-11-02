@@ -36,6 +36,12 @@ public class AppIntegrityManager {
                 });
             }
 
+            // In local development or debug builds, Google Play Integrity returns DF-DFERH-01
+            // because a dummy cloud project number is not linked in Google Play Console.
+            if (com.mysql.pocketsql.BuildConfig.DEBUG) {
+                return;
+            }
+
             // Generate a cryptographically secure random nonce using SecureRandom
             java.security.SecureRandom secureRandom = new java.security.SecureRandom();
             byte[] nonceBytes = new byte[24];

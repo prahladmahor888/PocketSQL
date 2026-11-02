@@ -10,6 +10,7 @@ import android.os.Bundle;
 import android.text.Spannable;
 import android.text.SpannableString;
 import android.text.SpannableStringBuilder;
+import android.widget.ProgressBar;
 import android.widget.Toast;
 import android.text.style.ForegroundColorSpan;
 import android.text.style.ScaleXSpan;
@@ -51,6 +52,7 @@ import com.mysql.pocketsql.BuildConfig;
 
 import java.io.File;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
 import java.util.Map;
 
@@ -526,6 +528,10 @@ public class HomeFragment extends Fragment {
         });
 
         dialog.setOnDismissListener(d -> showKeyboard());
+
+
+
+
         dialog.show();
 
         if (dialog.getWindow() != null) {
@@ -673,6 +679,113 @@ public class HomeFragment extends Fragment {
         btnToggleServer.setLayoutParams(btnLp);
         serverControlPanel.addView(btnToggleServer);
 
+        // --- Global Internet Access Panel ---
+        LinearLayout globalControlPanel = new LinearLayout(requireContext());
+        globalControlPanel.setOrientation(LinearLayout.VERTICAL);
+        globalControlPanel.setBackgroundColor(Color.parseColor("#151515"));
+        globalControlPanel.setPadding(dp12, dp12, dp12, dp12);
+        LinearLayout.LayoutParams globalLp = new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT);
+        globalLp.setMargins(0, 0, 0, dp12);
+        globalControlPanel.setLayoutParams(globalLp);
+
+        LinearLayout globalTitleRow = new LinearLayout(requireContext());
+        globalTitleRow.setOrientation(LinearLayout.HORIZONTAL);
+        globalTitleRow.setGravity(android.view.Gravity.CENTER_VERTICAL);
+
+        TextView tvGlobalHeader = new TextView(requireContext());
+        tvGlobalHeader.setText("🌐 Global Internet Access");
+        tvGlobalHeader.setTextColor(Color.parseColor("#00E5FF"));
+        tvGlobalHeader.setTextSize(TypedValue.COMPLEX_UNIT_SP, 12);
+        tvGlobalHeader.setTypeface(Typeface.create("sans-serif-medium", Typeface.BOLD));
+        tvGlobalHeader.setLayoutParams(new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f));
+        globalTitleRow.addView(tvGlobalHeader);
+
+        TextView tvGlobalStatusBadge = new TextView(requireContext());
+        tvGlobalStatusBadge.setTextSize(TypedValue.COMPLEX_UNIT_SP, 11);
+        tvGlobalStatusBadge.setTypeface(Typeface.DEFAULT_BOLD);
+        globalTitleRow.addView(tvGlobalStatusBadge);
+        globalControlPanel.addView(globalTitleRow);
+
+        View globalSpacer1 = new View(requireContext());
+        globalSpacer1.setLayoutParams(spacerLp);
+        globalControlPanel.addView(globalSpacer1);
+
+        LinearLayout globalUrlRow = new LinearLayout(requireContext());
+        globalUrlRow.setOrientation(LinearLayout.HORIZONTAL);
+        globalUrlRow.setGravity(android.view.Gravity.CENTER_VERTICAL);
+
+        TextView tvGlobalUrl = new TextView(requireContext());
+        tvGlobalUrl.setTextColor(Color.WHITE);
+        tvGlobalUrl.setTextSize(TypedValue.COMPLEX_UNIT_SP, 11);
+        tvGlobalUrl.setTypeface(Typeface.MONOSPACE);
+        tvGlobalUrl.setLayoutParams(new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f));
+        globalUrlRow.addView(tvGlobalUrl);
+
+        TextView btnCopyGlobal = new TextView(requireContext());
+        btnCopyGlobal.setText("Copy");
+        btnCopyGlobal.setTextColor(Color.parseColor("#00E5FF"));
+        btnCopyGlobal.setTextSize(TypedValue.COMPLEX_UNIT_SP, 11);
+        btnCopyGlobal.setPadding(dp8, dpToPx(4), dp8, dpToPx(4));
+        btnCopyGlobal.setClickable(true);
+        btnCopyGlobal.setFocusable(true);
+        globalUrlRow.addView(btnCopyGlobal);
+        globalControlPanel.addView(globalUrlRow);
+
+        TextView tvGlobalModeInfo = new TextView(requireContext());
+        tvGlobalModeInfo.setTextColor(Color.parseColor("#888888"));
+        tvGlobalModeInfo.setTextSize(TypedValue.COMPLEX_UNIT_SP, 10);
+        globalControlPanel.addView(tvGlobalModeInfo);
+
+        View globalSpacer2 = new View(requireContext());
+        globalSpacer2.setLayoutParams(spacerLp);
+        globalControlPanel.addView(globalSpacer2);
+
+        LinearLayout globalBtnsRow = new LinearLayout(requireContext());
+        globalBtnsRow.setOrientation(LinearLayout.HORIZONTAL);
+
+        TextView btnToggleGlobal = new TextView(requireContext());
+        btnToggleGlobal.setGravity(android.view.Gravity.CENTER);
+        btnToggleGlobal.setPadding(dp12, dp8, dp12, dp8);
+        btnToggleGlobal.setTextSize(TypedValue.COMPLEX_UNIT_SP, 11);
+        btnToggleGlobal.setTypeface(Typeface.DEFAULT_BOLD);
+        btnToggleGlobal.setClickable(true);
+        btnToggleGlobal.setFocusable(true);
+        LinearLayout.LayoutParams btnToggleLp = new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1.3f);
+        btnToggleLp.setMargins(0, 0, dpToPx(6), 0);
+        btnToggleGlobal.setLayoutParams(btnToggleLp);
+        globalBtnsRow.addView(btnToggleGlobal);
+
+        TextView btnConfigureDomain = new TextView(requireContext());
+        btnConfigureDomain.setText("⚙ Domain");
+        btnConfigureDomain.setGravity(android.view.Gravity.CENTER);
+        btnConfigureDomain.setTextColor(Color.WHITE);
+        btnConfigureDomain.setBackgroundColor(Color.parseColor("#2A2A2A"));
+        btnConfigureDomain.setPadding(dp8, dp8, dp8, dp8);
+        btnConfigureDomain.setTextSize(TypedValue.COMPLEX_UNIT_SP, 11);
+        btnConfigureDomain.setTypeface(Typeface.DEFAULT_BOLD);
+        btnConfigureDomain.setClickable(true);
+        btnConfigureDomain.setFocusable(true);
+        LinearLayout.LayoutParams btnConfLp = new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f);
+        btnConfLp.setMargins(0, 0, dpToPx(6), 0);
+        btnConfigureDomain.setLayoutParams(btnConfLp);
+        globalBtnsRow.addView(btnConfigureDomain);
+
+        TextView btnTestGlobal = new TextView(requireContext());
+        btnTestGlobal.setText("🧪 Test");
+        btnTestGlobal.setGravity(android.view.Gravity.CENTER);
+        btnTestGlobal.setTextColor(Color.WHITE);
+        btnTestGlobal.setBackgroundColor(Color.parseColor("#2A2A2A"));
+        btnTestGlobal.setPadding(dp8, dp8, dp8, dp8);
+        btnTestGlobal.setTextSize(TypedValue.COMPLEX_UNIT_SP, 11);
+        btnTestGlobal.setTypeface(Typeface.DEFAULT_BOLD);
+        btnTestGlobal.setClickable(true);
+        btnTestGlobal.setFocusable(true);
+        btnTestGlobal.setLayoutParams(new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 0.8f));
+        globalBtnsRow.addView(btnTestGlobal);
+
+        globalControlPanel.addView(globalBtnsRow);
+
         TextView tvGuide = new TextView(requireContext());
 
         Runnable refreshServerUI = new Runnable() {
@@ -711,12 +824,66 @@ public class HomeFragment extends Fragment {
                     tvNetworkUrl.setText("Network URL: http://" + hostAddress + ":" + portVal + "/api/query");
                 }
 
-                String guideIp = hostAddress.equals("localhost") ? "localhost" : hostAddress;
-                String guideText = "To query the database from other platforms, send a HTTP POST request:\n\n" +
-                        "End" + "point: ht" + "tp://" + guideIp + ":" + portVal + "/api/query\n" +
-                        "Me" + "thod: PO" + "ST\n" +
+                // Global Tunnel Status Update
+                com.mysql.pocketsql.engine.SqlTunnelManager tunnelMgr = com.mysql.pocketsql.engine.SqlApiHelper.getTunnelManager();
+                boolean globalEnabled = settings.isGlobalAccessEnabled();
+                boolean tunnelOnline = tunnelMgr != null && tunnelMgr.isTunnelActive();
+                String globalUrl = tunnelMgr != null ? tunnelMgr.getPublicUrl() : null;
+                int tunnelMode = settings.getGlobalTunnelMode();
+
+                String modeDesc;
+                if (tunnelMode == SettingsManager.TUNNEL_MODE_CUSTOM_DOMAIN && !settings.getGlobalCustomDomain().isEmpty()) {
+                    modeDesc = "Mode: Custom Domain (" + settings.getGlobalCustomDomain() + ")";
+                } else if (tunnelMode == SettingsManager.TUNNEL_MODE_CUSTOM_SUBDOMAIN && !settings.getGlobalCustomSubdomain().isEmpty()) {
+                    modeDesc = "Mode: Custom Subdomain (" + settings.getGlobalCustomSubdomain() + ")";
+                } else {
+                    modeDesc = "Mode: Auto Public Tunnel (Instant HTTPS)";
+                }
+                tvGlobalModeInfo.setText(modeDesc);
+
+                if (!globalEnabled) {
+                    tvGlobalStatusBadge.setText("DISABLED (LAN ONLY)");
+                    tvGlobalStatusBadge.setTextColor(Color.parseColor("#888888"));
+                    btnToggleGlobal.setText("ENABLE GLOBAL");
+                    btnToggleGlobal.setTextColor(Color.BLACK);
+                    btnToggleGlobal.setBackgroundColor(Color.parseColor("#00E5FF"));
+                    tvGlobalUrl.setText("Global URL: Inactive (Local network only)");
+                } else if (tunnelOnline && globalUrl != null) {
+                    tvGlobalStatusBadge.setText("ONLINE (HTTPS 🌐)");
+                    tvGlobalStatusBadge.setTextColor(Color.parseColor("#50FA7B"));
+                    btnToggleGlobal.setText("DISABLE GLOBAL");
+                    btnToggleGlobal.setTextColor(Color.WHITE);
+                    btnToggleGlobal.setBackgroundColor(Color.parseColor("#FF5555"));
+                    tvGlobalUrl.setText(globalUrl + "/api/query");
+                } else if (tunnelMgr != null && (tunnelMgr.getState() == com.mysql.pocketsql.engine.SqlTunnelManager.TunnelState.CONNECTING || tunnelMgr.getState() == com.mysql.pocketsql.engine.SqlTunnelManager.TunnelState.RECONNECTING)) {
+                    tvGlobalStatusBadge.setText("CONNECTING...");
+                    tvGlobalStatusBadge.setTextColor(Color.parseColor("#FFB86C"));
+                    btnToggleGlobal.setText("DISABLE GLOBAL");
+                    btnToggleGlobal.setTextColor(Color.WHITE);
+                    btnToggleGlobal.setBackgroundColor(Color.parseColor("#FF5555"));
+                    tvGlobalUrl.setText("Connecting to global gateway...");
+                } else {
+                    tvGlobalStatusBadge.setText("OFFLINE");
+                    tvGlobalStatusBadge.setTextColor(Color.parseColor("#FF5555"));
+                    btnToggleGlobal.setText("DISABLE GLOBAL");
+                    btnToggleGlobal.setTextColor(Color.WHITE);
+                    btnToggleGlobal.setBackgroundColor(Color.parseColor("#FF5555"));
+                    tvGlobalUrl.setText("Tunnel offline. Tap 'Domain' to check settings.");
+                }
+
+                String activeTargetEndpoint;
+                if (globalEnabled && tunnelOnline && globalUrl != null) {
+                    activeTargetEndpoint = globalUrl + "/api/query";
+                } else {
+                    String guideIp = hostAddress.equals("localhost") ? "localhost" : hostAddress;
+                    activeTargetEndpoint = "http://" + guideIp + ":" + portVal + "/api/query";
+                }
+
+                String guideText = "To query the database remotely from ANY external platform or server, send a HTTP POST request:\n\n" +
+                        "Endpoint: " + activeTargetEndpoint + "\n" +
+                        "Method: POST\n" +
                         "Headers:\n" +
-                        "  Authorization: " + "Bea" + "rer <your_api_key>\n" +
+                        "  Authorization: Bearer <your_api_key>\n" +
                         "  Content-Type: application/json\n\n" +
                         "Body:\n" +
                         "  {\n" +
@@ -726,22 +893,27 @@ public class HomeFragment extends Fragment {
                         "Python Example:\n" +
                         "import requests\n" +
                         "res = requests.post(\n" +
-                        "  'http://" + guideIp + ":" + portVal + "/api/query',\n" +
-                        "  headers={'Authorization': '" + "Bea" + "rer <key>'},\n" +
+                        "  '" + activeTargetEndpoint + "',\n" +
+                        "  headers={'Authorization': 'Bearer <key>'},\n" +
                         "  json={'sql': 'SELECT * FROM products;', 'database': 'ecommerce'}\n" +
                         ")\n" +
                         "print(res.json())\n\n" +
+                        "Node.js Example:\n" +
+                        "fetch('" + activeTargetEndpoint + "', {\n" +
+                        "  method: 'POST',\n" +
+                        "  headers: {'Authorization': 'Bearer <key>', 'Content-Type': 'application/json'},\n" +
+                        "  body: JSON.stringify({sql: 'SELECT * FROM products;', database: 'ecommerce'})\n" +
+                        "}).then(r => r.json()).then(console.log);\n\n" +
                         "Java Example:\n" +
                         "var client = java.net.http.HttpClient.newHttpClient();\n" +
                         "var request = java.net.http.HttpRequest.newBuilder()\n" +
-                        "  .uri(java.net.URI.create(\"http://" + guideIp + ":" + portVal + "/api/query\"))\n" +
-                        "  .header(\"Authorization\", \"" + "Bea" + "rer <key>\")\n" +
+                        "  .uri(java.net.URI.create(\"" + activeTargetEndpoint + "\"))\n" +
+                        "  .header(\"Authorization\", \"Bearer <key>\")\n" +
                         "  .header(\"Content-Type\", \"application/json\")\n" +
                         "  .POST(java.net.http.HttpRequest.BodyPublishers.ofString(\n" +
                         "    \"{\\\"sql\\\":\\\"SELECT * FROM products;\\\",\\\"database\\\":\\\"ecommerce\\\"}\"\n" +
                         "  )).build();\n" +
-                        "var response = client.send(request,\n" +
-                        "  java.net.http.HttpResponse.BodyHandlers.ofString());\n" +
+                        "var response = client.send(request, java.net.http.HttpResponse.BodyHandlers.ofString());\n" +
                         "System.out.println(response.body());";
                 tvGuide.setText(guideText);
             }
@@ -761,7 +933,84 @@ public class HomeFragment extends Fragment {
             refreshServerUI.run();
         });
 
+        btnToggleGlobal.setOnClickListener(v -> {
+            boolean currentlyEnabled = settings.isGlobalAccessEnabled();
+            boolean newEnabled = !currentlyEnabled;
+            settings.setGlobalAccessEnabled(newEnabled);
+
+            com.mysql.pocketsql.engine.SqlTunnelManager tunnelMgr = com.mysql.pocketsql.engine.SqlApiHelper.getTunnelManager();
+            if (newEnabled) {
+                if (apiServer == null || !apiServer.isRunning()) {
+                    startApiService();
+                }
+                if (tunnelMgr != null) {
+                    tunnelMgr.startTunnel();
+                }
+                Toast.makeText(requireContext(), R.string.toast_global_enabled, Toast.LENGTH_SHORT).show();
+            } else {
+                if (tunnelMgr != null) {
+                    tunnelMgr.stopTunnel();
+                }
+                Toast.makeText(requireContext(), R.string.toast_global_disabled, Toast.LENGTH_SHORT).show();
+            }
+            refreshServerUI.run();
+        });
+
+        btnConfigureDomain.setOnClickListener(v -> showGlobalDomainConfigDialog(refreshServerUI));
+
+        btnTestGlobal.setOnClickListener(v -> {
+            com.mysql.pocketsql.engine.SqlTunnelManager tunnelMgr = com.mysql.pocketsql.engine.SqlApiHelper.getTunnelManager();
+            if (tunnelMgr == null || !settings.isGlobalAccessEnabled()) {
+                Toast.makeText(requireContext(), "Please enable Global Internet Access first.", Toast.LENGTH_SHORT).show();
+                return;
+            }
+            Toast.makeText(requireContext(), "Testing Global API reachability...", Toast.LENGTH_SHORT).show();
+            tunnelMgr.testGlobalConnection(new com.mysql.pocketsql.engine.SqlTunnelClient.TestCallback() {
+                @Override
+                public void onSuccess(long latencyMs) {
+                    new AlertDialog.Builder(requireContext())
+                            .setTitle("🌐 Global API Online")
+                            .setMessage("Successfully reached PocketSQL from the global internet!\n\n" +
+                                    "Endpoint: " + tunnelMgr.getPublicUrl() + "/api/ping\n" +
+                                    "Latency: " + latencyMs + " ms\n" +
+                                    "Status: 200 OK")
+                            .setPositiveButton("OK", null)
+                            .show();
+                }
+
+                @Override
+                public void onFailure(String error) {
+                    new AlertDialog.Builder(requireContext())
+                            .setTitle("❌ Global Connection Test Failed")
+                            .setMessage("Could not reach Global API: " + error + "\n\n" +
+                                    "Ensure your device has internet access and the tunnel is active.")
+                            .setPositiveButton("OK", null)
+                            .show();
+                }
+            });
+        });
+
+        btnCopyGlobal.setOnClickListener(v -> {
+            com.mysql.pocketsql.engine.SqlTunnelManager tunnelMgr = com.mysql.pocketsql.engine.SqlApiHelper.getTunnelManager();
+            String pubUrl = tunnelMgr != null ? tunnelMgr.getPublicUrl() : null;
+            if (pubUrl == null || pubUrl.isEmpty()) {
+                pubUrl = settings.getGlobalLastPublicUrl();
+            }
+            if (pubUrl == null || pubUrl.isEmpty()) {
+                Toast.makeText(requireContext(), "No Global URL active yet.", Toast.LENGTH_SHORT).show();
+                return;
+            }
+            String copyUrl = pubUrl + "/api/query";
+            ClipboardManager clipboard = (ClipboardManager) requireContext().getSystemService(Context.CLIPBOARD_SERVICE);
+            ClipData clip = ClipData.newPlainText("PocketSQL Global API URL", copyUrl);
+            if (clipboard != null) {
+                com.mysql.pocketsql.engine.AppIntegrityManager.setPrimaryClip(clipboard, clip);
+                Toast.makeText(requireContext(), R.string.toast_global_url_copied, Toast.LENGTH_SHORT).show();
+            }
+        });
+
         parent.addView(serverControlPanel);
+        parent.addView(globalControlPanel);
 
         // Subtitle/Instructions header
         TextView tvSectionTitle = new TextView(requireContext());
@@ -894,7 +1143,8 @@ public class HomeFragment extends Fragment {
         dialog.setOnDismissListener(d -> showKeyboard());
 
         // Refresh/repopulate logic helper
-        Runnable repopulate = new Runnable() {
+        final Runnable[] repopulate = new Runnable[1];
+        repopulate[0] = new Runnable() {
             @Override
             public void run() {
                 listContainer.removeAllViews();
@@ -1047,14 +1297,17 @@ public class HomeFragment extends Fragment {
             apiKeyManager.generateKey(label, targetDb);
             etKeyLabel.setText("");
             Toast.makeText(requireContext(), R.string.toast_key_generated, Toast.LENGTH_SHORT).show();
-            repopulate.run(); // Refresh list!
+            repopulate[0].run(); // Refresh list!
         });
 
 
         // Initialize lists
-        repopulate.run();
+        repopulate[0].run();
         settings.applyFontToViewTree(parent);
 
+        com.mysql.pocketsql.engine.SqlTunnelManager.TunnelListener tunnelUiListener = (state, msg, url) -> refreshServerUI.run();
+        com.mysql.pocketsql.engine.SqlApiHelper.getTunnelManager().addListener(tunnelUiListener);
+        dialog.setOnDismissListener(d -> com.mysql.pocketsql.engine.SqlApiHelper.getTunnelManager().removeListener(tunnelUiListener));
         dialog.show();
 
         if (dialog.getWindow() != null) {
@@ -1064,6 +1317,458 @@ public class HomeFragment extends Fragment {
                     WindowManager.LayoutParams.MATCH_PARENT);
         }
     }
+
+    private void showGlobalDomainConfigDialog(final Runnable onUpdated) {
+        final int dp16 = dpToPx(16);
+        final int dp12 = dpToPx(12);
+        final int dp8 = dpToPx(8);
+        final int dp4 = dpToPx(4);
+
+        ScrollView scroll = new ScrollView(requireContext());
+        scroll.setBackgroundColor(Color.parseColor("#121212"));
+
+        LinearLayout layout = new LinearLayout(requireContext());
+        layout.setOrientation(LinearLayout.VERTICAL);
+        layout.setPadding(dp16, dp16, dp16, dp16);
+        scroll.addView(layout);
+
+        // Header Title & Subtitle
+        TextView tvTitle = new TextView(requireContext());
+        tvTitle.setText("🌐 Custom Domain & Server Setup");
+        tvTitle.setTextColor(Color.parseColor("#00E5FF"));
+        tvTitle.setTextSize(TypedValue.COMPLEX_UNIT_SP, 16);
+        tvTitle.setTypeface(Typeface.create("sans-serif-medium", Typeface.BOLD));
+        layout.addView(tvTitle);
+
+        TextView tvSubtitle = new TextView(requireContext());
+        tvSubtitle.setText("Configure your API endpoint dynamically at runtime like a real production server.");
+        tvSubtitle.setTextColor(Color.parseColor("#AAAAAA"));
+        tvSubtitle.setTextSize(TypedValue.COMPLEX_UNIT_SP, 11);
+        layout.addView(tvSubtitle);
+
+        View spacer1 = new View(requireContext());
+        spacer1.setLayoutParams(new LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, dp12));
+        layout.addView(spacer1);
+
+        // --- Segmented Tab Switcher (Clean 2-mode design) ---
+        LinearLayout tabContainer = new LinearLayout(requireContext());
+        tabContainer.setOrientation(LinearLayout.HORIZONTAL);
+        tabContainer.setBackgroundColor(Color.parseColor("#1E1E1E"));
+        tabContainer.setPadding(dp4, dp4, dp4, dp4);
+        LinearLayout.LayoutParams tabLp = new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT);
+        tabLp.setMargins(0, 0, 0, dp12);
+        tabContainer.setLayoutParams(tabLp);
+
+        TextView btnTabDefault = new TextView(requireContext());
+        btnTabDefault.setText("⚡ Free Tunnel (No Domain)");
+        btnTabDefault.setGravity(android.view.Gravity.CENTER);
+        btnTabDefault.setTextSize(TypedValue.COMPLEX_UNIT_SP, 11);
+        btnTabDefault.setPadding(dp8, dp8, dp8, dp8);
+        LinearLayout.LayoutParams tabItemLp1 = new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f);
+        btnTabDefault.setLayoutParams(tabItemLp1);
+        tabContainer.addView(btnTabDefault);
+
+        TextView btnTabCustom = new TextView(requireContext());
+        btnTabCustom.setText("🌐 Custom Domain (Real Server)");
+        btnTabCustom.setGravity(android.view.Gravity.CENTER);
+        btnTabCustom.setTextSize(TypedValue.COMPLEX_UNIT_SP, 11);
+        btnTabCustom.setPadding(dp8, dp8, dp8, dp8);
+        LinearLayout.LayoutParams tabItemLp2 = new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f);
+        btnTabCustom.setLayoutParams(tabItemLp2);
+        tabContainer.addView(btnTabCustom);
+
+        layout.addView(tabContainer);
+
+        // --- Panel 1: Default Free Public Tunnel ---
+        LinearLayout panelDefault = new LinearLayout(requireContext());
+        panelDefault.setOrientation(LinearLayout.VERTICAL);
+
+        LinearLayout defaultCard = new LinearLayout(requireContext());
+        defaultCard.setOrientation(LinearLayout.VERTICAL);
+        defaultCard.setBackgroundColor(Color.parseColor("#181818"));
+        defaultCard.setPadding(dp12, dp12, dp12, dp12);
+
+        TextView tvDefaultInfo = new TextView(requireContext());
+        tvDefaultInfo.setText("⚡ 1-Click Instant Public HTTPS Tunnel\n\n" +
+                "• No domain registration or DNS setup needed.\n" +
+                "• PocketSQL instantly provisions a secure HTTPS URL.\n" +
+                "• Connect from Postman, web apps, or backend servers anywhere.");
+        tvDefaultInfo.setTextColor(Color.parseColor("#CCCCCC"));
+        tvDefaultInfo.setTextSize(TypedValue.COMPLEX_UNIT_SP, 11);
+        defaultCard.addView(tvDefaultInfo);
+
+        View defSpacer1 = new View(requireContext());
+        defSpacer1.setLayoutParams(new LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, dp8));
+        defaultCard.addView(defSpacer1);
+
+        TextView tvSubdomainLabel = new TextView(requireContext());
+        tvSubdomainLabel.setText("Subdomain Prefix (Optional):");
+        tvSubdomainLabel.setTextColor(Color.parseColor("#888888"));
+        tvSubdomainLabel.setTextSize(TypedValue.COMPLEX_UNIT_SP, 11);
+        defaultCard.addView(tvSubdomainLabel);
+
+        EditText etDefaultSubdomain = new EditText(requireContext());
+        etDefaultSubdomain.setHint("e.g. pocketsql-demo (or leave blank for auto)");
+        etDefaultSubdomain.setHintTextColor(Color.parseColor("#555555"));
+        etDefaultSubdomain.setTextColor(Color.WHITE);
+        etDefaultSubdomain.setTextSize(TypedValue.COMPLEX_UNIT_SP, 13);
+        etDefaultSubdomain.setBackgroundColor(Color.parseColor("#222222"));
+        etDefaultSubdomain.setPadding(dp12, dp8, dp12, dp8);
+        etDefaultSubdomain.setText(settings.getGlobalCustomSubdomain());
+        defaultCard.addView(etDefaultSubdomain);
+
+        TextView tvDefaultPreview = new TextView(requireContext());
+        tvDefaultPreview.setTextColor(Color.parseColor("#00E5FF"));
+        tvDefaultPreview.setTextSize(TypedValue.COMPLEX_UNIT_SP, 11);
+        tvDefaultPreview.setTypeface(Typeface.MONOSPACE);
+        LinearLayout.LayoutParams defPrevLp = new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT);
+        defPrevLp.setMargins(0, dp8, 0, 0);
+        tvDefaultPreview.setLayoutParams(defPrevLp);
+        defaultCard.addView(tvDefaultPreview);
+
+        panelDefault.addView(defaultCard);
+        layout.addView(panelDefault);
+
+        // --- Panel 2: Custom Domain (Real Server Mode) ---
+        LinearLayout panelCustom = new LinearLayout(requireContext());
+        panelCustom.setOrientation(LinearLayout.VERTICAL);
+
+        LinearLayout customCard = new LinearLayout(requireContext());
+        customCard.setOrientation(LinearLayout.VERTICAL);
+        customCard.setBackgroundColor(Color.parseColor("#181818"));
+        customCard.setPadding(dp12, dp12, dp12, dp12);
+
+        TextView tvCustomInfo = new TextView(requireContext());
+        tvCustomInfo.setText("🌐 Custom Domain Setup (Real Production Server)\n\n" +
+                "Connect your own branded domain (e.g. api.yourdomain.com) so external apps connect as if PocketSQL were a production cloud MySQL database.");
+        tvCustomInfo.setTextColor(Color.parseColor("#CCCCCC"));
+        tvCustomInfo.setTextSize(TypedValue.COMPLEX_UNIT_SP, 11);
+        customCard.addView(tvCustomInfo);
+
+        View custSpacer1 = new View(requireContext());
+        custSpacer1.setLayoutParams(new LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, dp8));
+        customCard.addView(custSpacer1);
+
+        // Step 1: Input Domain
+        TextView tvDomainInputLabel = new TextView(requireContext());
+        tvDomainInputLabel.setText("Step 1: Enter Your Custom Domain");
+        tvDomainInputLabel.setTextColor(Color.parseColor("#00E5FF"));
+        tvDomainInputLabel.setTextSize(TypedValue.COMPLEX_UNIT_SP, 11);
+        tvDomainInputLabel.setTypeface(Typeface.DEFAULT_BOLD);
+        customCard.addView(tvDomainInputLabel);
+
+        EditText etCustomDomainInput = new EditText(requireContext());
+        etCustomDomainInput.setHint("e.g. api.yourdomain.com");
+        etCustomDomainInput.setHintTextColor(Color.parseColor("#555555"));
+        etCustomDomainInput.setTextColor(Color.WHITE);
+        etCustomDomainInput.setTextSize(TypedValue.COMPLEX_UNIT_SP, 13);
+        etCustomDomainInput.setBackgroundColor(Color.parseColor("#222222"));
+        etCustomDomainInput.setPadding(dp12, dp8, dp12, dp8);
+        etCustomDomainInput.setText(settings.getGlobalCustomDomain());
+        customCard.addView(etCustomDomainInput);
+
+        TextView tvCustomLivePreview = new TextView(requireContext());
+        tvCustomLivePreview.setTextColor(Color.parseColor("#50FA7B"));
+        tvCustomLivePreview.setTextSize(TypedValue.COMPLEX_UNIT_SP, 11);
+        tvCustomLivePreview.setTypeface(Typeface.MONOSPACE);
+        LinearLayout.LayoutParams custPrevLp = new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT);
+        custPrevLp.setMargins(0, dp4, 0, dp8);
+        tvCustomLivePreview.setLayoutParams(custPrevLp);
+        customCard.addView(tvCustomLivePreview);
+
+        // Step 2: In-app DNS Configuration Box
+        LinearLayout dnsGuideBox = new LinearLayout(requireContext());
+        dnsGuideBox.setOrientation(LinearLayout.VERTICAL);
+        dnsGuideBox.setBackgroundColor(Color.parseColor("#222222"));
+        dnsGuideBox.setPadding(dp12, dp12, dp12, dp12);
+        LinearLayout.LayoutParams dnsLp = new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT);
+        dnsLp.setMargins(0, dp4, 0, dp8);
+        dnsGuideBox.setLayoutParams(dnsLp);
+
+        TextView tvDnsGuideTitle = new TextView(requireContext());
+        tvDnsGuideTitle.setText("Step 2: Add this CNAME in your DNS Manager");
+        tvDnsGuideTitle.setTextColor(Color.parseColor("#00E5FF"));
+        tvDnsGuideTitle.setTextSize(TypedValue.COMPLEX_UNIT_SP, 11);
+        tvDnsGuideTitle.setTypeface(Typeface.DEFAULT_BOLD);
+        dnsGuideBox.addView(tvDnsGuideTitle);
+
+        TextView tvDnsSub = new TextView(requireContext());
+        tvDnsSub.setText("Open Cloudflare, GoDaddy, Namecheap, or Hostinger and add:");
+        tvDnsSub.setTextColor(Color.parseColor("#888888"));
+        tvDnsSub.setTextSize(TypedValue.COMPLEX_UNIT_SP, 10);
+        dnsGuideBox.addView(tvDnsSub);
+
+        // Styled DNS Table inside DNS box
+        TextView tvDnsTable = new TextView(requireContext());
+        tvDnsTable.setTextColor(Color.WHITE);
+        tvDnsTable.setTextSize(TypedValue.COMPLEX_UNIT_SP, 11);
+        tvDnsTable.setTypeface(Typeface.MONOSPACE);
+        tvDnsTable.setPadding(0, dp8, 0, dp8);
+        dnsGuideBox.addView(tvDnsTable);
+
+        // Button to Copy DNS Record in 1 tap
+        TextView btnCopyDnsRecord = new TextView(requireContext());
+        btnCopyDnsRecord.setText("📋 Copy DNS Record Values");
+        btnCopyDnsRecord.setTextColor(Color.BLACK);
+        btnCopyDnsRecord.setBackgroundColor(Color.parseColor("#50FA7B"));
+        btnCopyDnsRecord.setTypeface(Typeface.DEFAULT_BOLD);
+        btnCopyDnsRecord.setTextSize(TypedValue.COMPLEX_UNIT_SP, 11);
+        btnCopyDnsRecord.setGravity(android.view.Gravity.CENTER);
+        btnCopyDnsRecord.setPadding(dp12, dp8, dp12, dp8);
+        btnCopyDnsRecord.setClickable(true);
+        btnCopyDnsRecord.setFocusable(true);
+        dnsGuideBox.addView(btnCopyDnsRecord);
+
+        // Quick provider tips
+        TextView tvDnsTips = new TextView(requireContext());
+        tvDnsTips.setText("💡 Quick Provider Tips:\n" +
+                "• Cloudflare: Set Proxy Status to 'DNS Only' (Grey cloud) or Proxied.\n" +
+                "• GoDaddy / Hostinger: DNS Management ➔ Add Record ➔ Select CNAME.\n" +
+                "• DNS propagation usually takes 1 to 5 minutes.");
+        tvDnsTips.setTextColor(Color.parseColor("#AAAAAA"));
+        tvDnsTips.setTextSize(TypedValue.COMPLEX_UNIT_SP, 10);
+        tvDnsTips.setPadding(0, dp8, 0, 0);
+        dnsGuideBox.addView(tvDnsTips);
+
+        customCard.addView(dnsGuideBox);
+
+        // Step 3: Save & Connect
+        TextView tvStep3 = new TextView(requireContext());
+        tvStep3.setText("Step 3: Tap 'Save & Connect Runtime' below. Once saved, you can use the '🧪 Test' button in API Keys to verify connectivity!");
+        tvStep3.setTextColor(Color.parseColor("#888888"));
+        tvStep3.setTextSize(TypedValue.COMPLEX_UNIT_SP, 10);
+        tvStep3.setPadding(0, dp4, 0, dp8);
+        customCard.addView(tvStep3);
+
+        // Optional Advanced Gateway Toggle
+        TextView tvAdvancedToggle = new TextView(requireContext());
+        tvAdvancedToggle.setText("▸ Advanced Gateway Server (Optional)");
+        tvAdvancedToggle.setTextColor(Color.parseColor("#777777"));
+        tvAdvancedToggle.setTextSize(TypedValue.COMPLEX_UNIT_SP, 10);
+        tvAdvancedToggle.setPadding(0, dp8, 0, dp4);
+        tvAdvancedToggle.setClickable(true);
+        tvAdvancedToggle.setFocusable(true);
+        customCard.addView(tvAdvancedToggle);
+
+        LinearLayout advContainer = new LinearLayout(requireContext());
+        advContainer.setOrientation(LinearLayout.VERTICAL);
+        advContainer.setVisibility(View.GONE);
+
+        EditText etCustomServer = new EditText(requireContext());
+        etCustomServer.setHint("Tunnel Gateway (default: https://loca.lt)");
+        etCustomServer.setHintTextColor(Color.parseColor("#555555"));
+        etCustomServer.setTextColor(Color.WHITE);
+        etCustomServer.setTextSize(TypedValue.COMPLEX_UNIT_SP, 12);
+        etCustomServer.setBackgroundColor(Color.parseColor("#222222"));
+        etCustomServer.setPadding(dp8, dp4, dp8, dp4);
+        etCustomServer.setText(settings.getGlobalCustomServer());
+        advContainer.addView(etCustomServer);
+
+        customCard.addView(advContainer);
+
+        tvAdvancedToggle.setOnClickListener(v -> {
+            if (advContainer.getVisibility() == View.VISIBLE) {
+                advContainer.setVisibility(View.GONE);
+                tvAdvancedToggle.setText("▸ Advanced Gateway Server (Optional)");
+            } else {
+                advContainer.setVisibility(View.VISIBLE);
+                tvAdvancedToggle.setText("▾ Advanced Gateway Server (Optional)");
+            }
+        });
+
+        panelCustom.addView(customCard);
+        layout.addView(panelCustom);
+
+        // --- Live Preview Text Watchers ---
+        Runnable updatePreviews = () -> {
+            String sub = etDefaultSubdomain.getText().toString().trim();
+            if (sub.isEmpty()) sub = "your-app-id";
+            tvDefaultPreview.setText("🔗 Endpoint: https://" + sub + ".loca.lt/api/query");
+
+            String cDom = etCustomDomainInput.getText().toString().trim();
+            String hostPrefix = "api";
+            if (!cDom.isEmpty()) {
+                String clean = cDom.replace("https://", "").replace("http://", "").replaceAll("/.*", "").trim();
+                String[] parts = clean.split("\\.");
+                if (parts.length > 0) {
+                    hostPrefix = parts[0];
+                }
+            }
+            if (cDom.isEmpty()) cDom = "api.yourdomain.com";
+            if (!cDom.startsWith("http://") && !cDom.startsWith("https://")) {
+                cDom = "https://" + cDom;
+            }
+            cDom = cDom.replaceAll("/+$", "");
+            tvCustomLivePreview.setText("🔗 Live Endpoint: " + cDom + "/api/query");
+
+            String server = etCustomServer.getText().toString().trim();
+            String targetHost = "loca.lt";
+            if (!server.isEmpty()) {
+                try {
+                    targetHost = new java.net.URL(server).getHost();
+                } catch (Exception ignored) {}
+            }
+            tvDnsTable.setText("Type:    CNAME\nName:    " + hostPrefix + "\nTarget:  " + targetHost + "\nTTL:     Auto / 1 min");
+        };
+
+        btnCopyDnsRecord.setOnClickListener(v -> {
+            String domain = etCustomDomainInput.getText().toString().trim();
+            String hostPrefix = "api";
+            if (!domain.isEmpty()) {
+                String clean = domain.replace("https://", "").replace("http://", "").replaceAll("/.*", "").trim();
+                String[] parts = clean.split("\\.");
+                if (parts.length > 0) {
+                    hostPrefix = parts[0];
+                }
+            }
+            String server = etCustomServer.getText().toString().trim();
+            String targetHost = "loca.lt";
+            if (!server.isEmpty()) {
+                try {
+                    targetHost = new java.net.URL(server).getHost();
+                } catch (Exception ignored) {}
+            }
+            String dnsCopyText = "Record Type: CNAME\nHost / Name: " + hostPrefix + "\nTarget / Points To: " + targetHost + "\nTTL: Auto / 1 min";
+            ClipboardManager clipboard = (ClipboardManager) requireContext().getSystemService(Context.CLIPBOARD_SERVICE);
+            ClipData clip = ClipData.newPlainText("PocketSQL DNS Config", dnsCopyText);
+            if (clipboard != null) {
+                com.mysql.pocketsql.engine.AppIntegrityManager.setPrimaryClip(clipboard, clip);
+                Toast.makeText(requireContext(), R.string.toast_dns_copied, Toast.LENGTH_SHORT).show();
+            }
+        });
+
+        android.text.TextWatcher watcher = new android.text.TextWatcher() {
+            @Override public void beforeTextChanged(CharSequence s, int start, int count, int after) {}
+            @Override public void onTextChanged(CharSequence s, int start, int before, int count) { updatePreviews.run(); }
+            @Override public void afterTextChanged(android.text.Editable s) {}
+        };
+        etDefaultSubdomain.addTextChangedListener(watcher);
+        etCustomDomainInput.addTextChangedListener(watcher);
+        etCustomServer.addTextChangedListener(watcher);
+        updatePreviews.run();
+
+        // --- Tab State Switcher ---
+        final boolean[] isCustomMode = new boolean[]{
+                settings.getGlobalTunnelMode() == SettingsManager.TUNNEL_MODE_CUSTOM_DOMAIN
+        };
+
+        Runnable updateTabUI = () -> {
+            if (isCustomMode[0]) {
+                btnTabCustom.setBackgroundColor(Color.parseColor("#00E5FF"));
+                btnTabCustom.setTextColor(Color.BLACK);
+                btnTabCustom.setTypeface(Typeface.DEFAULT_BOLD);
+
+                btnTabDefault.setBackgroundColor(Color.TRANSPARENT);
+                btnTabDefault.setTextColor(Color.parseColor("#888888"));
+                btnTabDefault.setTypeface(Typeface.DEFAULT);
+
+                panelDefault.setVisibility(View.GONE);
+                panelCustom.setVisibility(View.VISIBLE);
+            } else {
+                btnTabDefault.setBackgroundColor(Color.parseColor("#00E5FF"));
+                btnTabDefault.setTextColor(Color.BLACK);
+                btnTabDefault.setTypeface(Typeface.DEFAULT_BOLD);
+
+                btnTabCustom.setBackgroundColor(Color.TRANSPARENT);
+                btnTabCustom.setTextColor(Color.parseColor("#888888"));
+                btnTabCustom.setTypeface(Typeface.DEFAULT);
+
+                panelDefault.setVisibility(View.VISIBLE);
+                panelCustom.setVisibility(View.GONE);
+            }
+        };
+
+        btnTabDefault.setOnClickListener(v -> {
+            isCustomMode[0] = false;
+            updateTabUI.run();
+        });
+
+        btnTabCustom.setOnClickListener(v -> {
+            isCustomMode[0] = true;
+            updateTabUI.run();
+        });
+
+        updateTabUI.run();
+
+        View spacerBottom = new View(requireContext());
+        spacerBottom.setLayoutParams(new LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, dp16));
+        layout.addView(spacerBottom);
+
+        // --- Bottom Action Buttons ---
+        LinearLayout btnsRow = new LinearLayout(requireContext());
+        btnsRow.setOrientation(LinearLayout.HORIZONTAL);
+        btnsRow.setGravity(android.view.Gravity.END);
+
+        android.widget.Button btnCancel = new android.widget.Button(requireContext());
+        btnCancel.setText(R.string.btn_cancel);
+        btnCancel.setTextColor(Color.WHITE);
+        btnCancel.setBackgroundColor(Color.TRANSPARENT);
+        btnsRow.addView(btnCancel);
+
+        android.widget.Button btnSave = new android.widget.Button(requireContext());
+        btnSave.setText("💾 Save & Connect Runtime");
+        btnSave.setTextColor(Color.BLACK);
+        btnSave.setBackgroundColor(Color.parseColor("#00E5FF"));
+        btnSave.setTypeface(Typeface.DEFAULT_BOLD);
+        btnsRow.addView(btnSave);
+
+        layout.addView(btnsRow);
+
+        AlertDialog configDialog = new AlertDialog.Builder(requireContext())
+                .setView(scroll)
+                .create();
+
+        btnCancel.setOnClickListener(v -> configDialog.dismiss());
+
+        btnSave.setOnClickListener(v -> {
+            int selectedMode;
+            String domain = etCustomDomainInput.getText().toString().trim();
+            String subdomain = etDefaultSubdomain.getText().toString().trim();
+            String server = etCustomServer.getText().toString().trim();
+            if (server.isEmpty()) {
+                server = "https://loca.lt";
+            }
+
+            if (isCustomMode[0]) {
+                if (domain.isEmpty()) {
+                    Toast.makeText(requireContext(), "Please enter your custom domain (e.g. api.yourdomain.com)", Toast.LENGTH_SHORT).show();
+                    return;
+                }
+                selectedMode = SettingsManager.TUNNEL_MODE_CUSTOM_DOMAIN;
+            } else {
+                selectedMode = subdomain.isEmpty()
+                        ? SettingsManager.TUNNEL_MODE_AUTO_PUBLIC
+                        : SettingsManager.TUNNEL_MODE_CUSTOM_SUBDOMAIN;
+            }
+
+            com.mysql.pocketsql.engine.SqlTunnelManager tunnelMgr = com.mysql.pocketsql.engine.SqlApiHelper.getTunnelManager();
+            if (tunnelMgr != null) {
+                tunnelMgr.updateConfiguration(selectedMode, domain, subdomain, server);
+            } else {
+                settings.setGlobalTunnelMode(selectedMode);
+                settings.setGlobalCustomDomain(domain);
+                settings.setGlobalCustomSubdomain(subdomain);
+                settings.setGlobalCustomServer(server);
+            }
+
+            Toast.makeText(requireContext(), "✅ Custom domain setup applied at runtime!", Toast.LENGTH_SHORT).show();
+            configDialog.dismiss();
+            if (onUpdated != null) {
+                onUpdated.run();
+            }
+        });
+
+        settings.applyFontToViewTree(scroll);
+        configDialog.show();
+        if (configDialog.getWindow() != null) {
+            configDialog.getWindow().setBackgroundDrawableResource(android.R.color.transparent);
+        }
+    }
+
 
     private void setupTerminal() {
         etCommandInput.setOnEditorActionListener((v, actionId, event) -> {
@@ -1254,6 +1959,8 @@ public class HomeFragment extends Fragment {
         TextView btnExport        = dialogView.findViewById(R.id.btnExportDatabase);
         TextView btnImport        = dialogView.findViewById(R.id.btnImportDatabase);
 
+        TextView btnManageDb      = dialogView.findViewById(R.id.btnManageDatabases);
+
         settings.applyFontToViewTree(dialogView);
 
         // ── Restore current values ───────────────────────────────────────
@@ -1351,6 +2058,12 @@ public class HomeFragment extends Fragment {
             dialog.dismiss();
         });
 
+        if (btnManageDb != null) {
+            btnManageDb.setOnClickListener(v -> {
+                dialog.dismiss();
+                showDatabaseManagerDialog();
+            });
+        }
         btnCancel.setOnClickListener(v -> dialog.dismiss());
         btnClose.setOnClickListener(v -> dialog.dismiss());
 
@@ -3170,5 +3883,373 @@ public class HomeFragment extends Fragment {
     @Override
     public void onDestroy() {
         super.onDestroy();
+    }
+
+    private static class SampleDbModel {
+        final String id;
+        final String displayName;
+        final String description;
+
+        SampleDbModel(String id, String displayName, String description) {
+            this.id = id;
+            this.displayName = displayName;
+            this.description = description;
+        }
+    }
+
+    private void showDatabaseManagerDialog() {
+        final int dp16 = dpToPx(16);
+        final int dp12 = dpToPx(12);
+        final int dp8 = dpToPx(8);
+        final int dp4 = dpToPx(4);
+
+        ScrollView scroll = new ScrollView(requireContext());
+        scroll.setBackgroundColor(Color.parseColor("#121212"));
+
+        LinearLayout layout = new LinearLayout(requireContext());
+        layout.setOrientation(LinearLayout.VERTICAL);
+        layout.setPadding(dp16, dp16, dp16, dp16);
+        scroll.addView(layout);
+
+        // Header Title & Subtitle
+        TextView tvTitle = new TextView(requireContext());
+        tvTitle.setText("🗄 Configure & Install Databases");
+        tvTitle.setTextColor(Color.parseColor("#00E5FF"));
+        tvTitle.setTextSize(TypedValue.COMPLEX_UNIT_SP, 16);
+        tvTitle.setTypeface(Typeface.create("sans-serif-medium", Typeface.BOLD));
+        layout.addView(tvTitle);
+
+        TextView tvSubtitle = new TextView(requireContext());
+        tvSubtitle.setText("Switch active default database or install remaining sample datasets anytime.");
+        tvSubtitle.setTextColor(Color.parseColor("#AAAAAA"));
+        tvSubtitle.setTextSize(TypedValue.COMPLEX_UNIT_SP, 11);
+        layout.addView(tvSubtitle);
+
+        View spacer1 = new View(requireContext());
+        spacer1.setLayoutParams(new LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, dp12));
+        layout.addView(spacer1);
+
+        // Active DB Banner
+        LinearLayout bannerActive = new LinearLayout(requireContext());
+        bannerActive.setOrientation(LinearLayout.HORIZONTAL);
+        bannerActive.setBackgroundColor(Color.parseColor("#1B2234"));
+        bannerActive.setPadding(dp12, dp8, dp12, dp8);
+        bannerActive.setGravity(android.view.Gravity.CENTER_VERTICAL);
+        LinearLayout.LayoutParams bannerLp = new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT);
+        bannerLp.setMargins(0, 0, 0, dp12);
+        bannerActive.setLayoutParams(bannerLp);
+
+        TextView tvBannerLabel = new TextView(requireContext());
+        tvBannerLabel.setText("Active Database: ");
+        tvBannerLabel.setTextColor(Color.parseColor("#8ECAE6"));
+        tvBannerLabel.setTextSize(TypedValue.COMPLEX_UNIT_SP, 12);
+        bannerActive.addView(tvBannerLabel);
+
+        TextView tvBannerValue = new TextView(requireContext());
+        tvBannerValue.setTextColor(Color.parseColor("#50FA7B"));
+        tvBannerValue.setTextSize(TypedValue.COMPLEX_UNIT_SP, 12);
+        tvBannerValue.setTypeface(Typeface.DEFAULT_BOLD);
+        bannerActive.addView(tvBannerValue);
+        layout.addView(bannerActive);
+
+        // Databases list container
+        LinearLayout listContainer = new LinearLayout(requireContext());
+        listContainer.setOrientation(LinearLayout.VERTICAL);
+        layout.addView(listContainer);
+
+        // Bottom action buttons
+        LinearLayout footer = new LinearLayout(requireContext());
+        footer.setOrientation(LinearLayout.HORIZONTAL);
+        footer.setGravity(android.view.Gravity.END);
+        footer.setPadding(0, dp12, 0, 0);
+
+        TextView btnClose = new TextView(requireContext());
+        btnClose.setText("Close");
+        btnClose.setTextColor(Color.parseColor("#AAAAAA"));
+        btnClose.setTextSize(TypedValue.COMPLEX_UNIT_SP, 13);
+        btnClose.setTypeface(Typeface.create("sans-serif-medium", Typeface.BOLD));
+        btnClose.setPadding(dp16, dp8, dp16, dp8);
+        btnClose.setClickable(true);
+        btnClose.setFocusable(true);
+        footer.addView(btnClose);
+        layout.addView(footer);
+
+        settings.applyFontToViewTree(scroll);
+
+        AlertDialog dialog = new AlertDialog.Builder(requireContext())
+                .setView(scroll)
+                .create();
+
+        btnClose.setOnClickListener(v -> dialog.dismiss());
+
+        final SampleDbModel[] sampleDbs = new SampleDbModel[]{
+                new SampleDbModel("ecommerce", "🛒 E-Commerce & Retail", "Products, customers, orders, items, categories & reviews."),
+                new SampleDbModel("banking", "🏦 Banking & Finance", "Customers, branches, bank accounts, cards & transactions."),
+                new SampleDbModel("school", "🎓 School & Education", "Students, courses, teachers, enrollments, attendance & grades."),
+                new SampleDbModel("social", "👥 Social Network", "User profiles, posts, comments, likes, hashtags & followers.")
+        };
+
+        final Runnable[] repopulate = new Runnable[1];
+        repopulate[0] = new Runnable() {
+            @Override
+            public void run() {
+                listContainer.removeAllViews();
+                String activeDb = engine != null ? engine.getActiveDatabase() : null;
+                if (activeDb == null || activeDb.isEmpty()) {
+                    activeDb = settings.getDefaultDatabase();
+                }
+                tvBannerValue.setText(activeDb != null && !activeDb.isEmpty() ? activeDb : "None");
+
+                final List<String> uninstalled = new ArrayList<>();
+
+                for (SampleDbModel db : sampleDbs) {
+                    boolean isInstalled = false;
+                    try {
+                        isInstalled = engine != null && engine.getStorageEngine() != null && engine.getStorageEngine().databaseExists(db.id);
+                    } catch (Exception ignored) {}
+
+                    if (!isInstalled) {
+                        uninstalled.add(db.id);
+                    }
+
+                    boolean isActive = db.id.equalsIgnoreCase(activeDb);
+
+                    // Card container
+                    LinearLayout card = new LinearLayout(requireContext());
+                    card.setOrientation(LinearLayout.VERTICAL);
+                    card.setBackgroundColor(Color.parseColor("#181818"));
+                    card.setPadding(dp12, dp12, dp12, dp12);
+                    LinearLayout.LayoutParams cardLp = new LinearLayout.LayoutParams(
+                            LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT);
+                    cardLp.setMargins(0, 0, 0, dp8);
+                    card.setLayoutParams(cardLp);
+
+                    // Title row
+                    LinearLayout titleRow = new LinearLayout(requireContext());
+                    titleRow.setOrientation(LinearLayout.HORIZONTAL);
+                    titleRow.setGravity(android.view.Gravity.CENTER_VERTICAL);
+
+                    TextView tvDbTitle = new TextView(requireContext());
+                    tvDbTitle.setText(db.displayName);
+                    tvDbTitle.setTextColor(Color.WHITE);
+                    tvDbTitle.setTextSize(TypedValue.COMPLEX_UNIT_SP, 13);
+                    tvDbTitle.setTypeface(Typeface.create("sans-serif-medium", Typeface.BOLD));
+                    tvDbTitle.setLayoutParams(new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f));
+                    titleRow.addView(tvDbTitle);
+
+                    TextView tvStatusBadge = new TextView(requireContext());
+                    tvStatusBadge.setTextSize(TypedValue.COMPLEX_UNIT_SP, 10);
+                    tvStatusBadge.setTypeface(Typeface.DEFAULT_BOLD);
+                    tvStatusBadge.setPadding(dp4, 0, dp4, 0);
+
+                    if (isActive) {
+                        tvStatusBadge.setText("★ ACTIVE");
+                        tvStatusBadge.setTextColor(Color.parseColor("#00E5FF"));
+                    } else if (isInstalled) {
+                        tvStatusBadge.setText("✔ INSTALLED");
+                        tvStatusBadge.setTextColor(Color.parseColor("#50FA7B"));
+                    } else {
+                        tvStatusBadge.setText("⚪ NOT INSTALLED");
+                        tvStatusBadge.setTextColor(Color.parseColor("#888888"));
+                    }
+                    titleRow.addView(tvStatusBadge);
+                    card.addView(titleRow);
+
+                    // Description
+                    TextView tvDesc = new TextView(requireContext());
+                    tvDesc.setText(db.description);
+                    tvDesc.setTextColor(Color.parseColor("#999999"));
+                    tvDesc.setTextSize(TypedValue.COMPLEX_UNIT_SP, 10);
+                    tvDesc.setPadding(0, dp4, 0, dp8);
+                    card.addView(tvDesc);
+
+                    // Action buttons
+                    LinearLayout actRow = new LinearLayout(requireContext());
+                    actRow.setOrientation(LinearLayout.HORIZONTAL);
+                    actRow.setGravity(android.view.Gravity.END);
+
+                    final String dbId = db.id;
+
+                    if (isInstalled) {
+                        if (!isActive) {
+                            TextView btnSetActive = new TextView(requireContext());
+                            btnSetActive.setText("★ Set Active");
+                            btnSetActive.setTextColor(Color.BLACK);
+                            btnSetActive.setBackgroundColor(Color.parseColor("#00E5FF"));
+                            btnSetActive.setTextSize(TypedValue.COMPLEX_UNIT_SP, 11);
+                            btnSetActive.setTypeface(Typeface.DEFAULT_BOLD);
+                            btnSetActive.setPadding(dp8, dp4, dp8, dp4);
+                            btnSetActive.setClickable(true);
+                            btnSetActive.setFocusable(true);
+                            btnSetActive.setOnClickListener(v -> {
+                                try {
+                                    if (engine != null) {
+                                        engine.useDatabase(dbId);
+                                    }
+                                    settings.setDefaultDatabase(dbId);
+                                    refreshTerminalPrompt();
+                                    Toast.makeText(requireContext(), "Active database set to: " + dbId, Toast.LENGTH_SHORT).show();
+                                    repopulate[0].run();
+                                } catch (Exception e) {
+                                    Toast.makeText(requireContext(), "Error: " + e.getMessage(), Toast.LENGTH_SHORT).show();
+                                }
+                            });
+                            LinearLayout.LayoutParams setActLp = new LinearLayout.LayoutParams(
+                                    LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT);
+                            setActLp.setMarginEnd(dp8);
+                            btnSetActive.setLayoutParams(setActLp);
+                            actRow.addView(btnSetActive);
+                        }
+
+                        TextView btnReset = new TextView(requireContext());
+                        btnReset.setText("🔄 Reset Data");
+                        btnReset.setTextColor(Color.parseColor("#AAAAAA"));
+                        btnReset.setTextSize(TypedValue.COMPLEX_UNIT_SP, 11);
+                        btnReset.setPadding(dp8, dp4, dp8, dp4);
+                        btnReset.setClickable(true);
+                        btnReset.setFocusable(true);
+                        btnReset.setOnClickListener(v -> {
+                            new AlertDialog.Builder(requireContext())
+                                    .setTitle("Reset " + dbId + "?")
+                                    .setMessage("This will drop and re-seed all tables in '" + dbId + "' with default sample records.")
+                                    .setPositiveButton("Reset", (d, w) -> {
+                                        installDatabasesWithProgress(Collections.singletonList(dbId), true, repopulate[0]);
+                                    })
+                                    .setNegativeButton("Cancel", null)
+                                    .show();
+                        });
+                        actRow.addView(btnReset);
+                    } else {
+                        TextView btnInstall = new TextView(requireContext());
+                        btnInstall.setText("📥 Install & Seed");
+                        btnInstall.setTextColor(Color.BLACK);
+                        btnInstall.setBackgroundColor(Color.parseColor("#50FA7B"));
+                        btnInstall.setTextSize(TypedValue.COMPLEX_UNIT_SP, 11);
+                        btnInstall.setTypeface(Typeface.DEFAULT_BOLD);
+                        btnInstall.setPadding(dp12, dp4, dp12, dp4);
+                        btnInstall.setClickable(true);
+                        btnInstall.setFocusable(true);
+                        btnInstall.setOnClickListener(v -> {
+                            installDatabasesWithProgress(Collections.singletonList(dbId), false, repopulate[0]);
+                        });
+                        actRow.addView(btnInstall);
+                    }
+
+                    card.addView(actRow);
+                    listContainer.addView(card);
+                }
+
+                // Batch Install button if any uninstalled
+                if (!uninstalled.isEmpty()) {
+                    TextView btnInstallAll = new TextView(requireContext());
+                    btnInstallAll.setText("📥 Install All Remaining Databases (" + uninstalled.size() + ")");
+                    btnInstallAll.setTextColor(Color.BLACK);
+                    btnInstallAll.setBackgroundColor(Color.parseColor("#00E5FF"));
+                    btnInstallAll.setTextSize(TypedValue.COMPLEX_UNIT_SP, 12);
+                    btnInstallAll.setTypeface(Typeface.DEFAULT_BOLD);
+                    btnInstallAll.setGravity(android.view.Gravity.CENTER);
+                    btnInstallAll.setPadding(dp12, dp8, dp12, dp8);
+                    btnInstallAll.setClickable(true);
+                    btnInstallAll.setFocusable(true);
+                    LinearLayout.LayoutParams allLp = new LinearLayout.LayoutParams(
+                            LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT);
+                    allLp.setMargins(0, dp8, 0, dp8);
+                    btnInstallAll.setLayoutParams(allLp);
+                    btnInstallAll.setOnClickListener(v -> {
+                        installDatabasesWithProgress(uninstalled, false, repopulate[0]);
+                    });
+                    listContainer.addView(btnInstallAll);
+                }
+            }
+        };
+
+        repopulate[0].run();
+        dialog.show();
+
+        if (dialog.getWindow() != null) {
+            dialog.getWindow().setBackgroundDrawableResource(android.R.color.transparent);
+            dialog.getWindow().setLayout(
+                    WindowManager.LayoutParams.MATCH_PARENT,
+                    WindowManager.LayoutParams.WRAP_CONTENT);
+        }
+    }
+
+    private void installDatabasesWithProgress(final List<String> dbsToInstall, final boolean forceReload, final Runnable onCompleted) {
+        final int dp16 = dpToPx(16);
+        final int dp8 = dpToPx(8);
+
+        LinearLayout pLayout = new LinearLayout(requireContext());
+        pLayout.setOrientation(LinearLayout.VERTICAL);
+        pLayout.setBackgroundColor(Color.parseColor("#151515"));
+        pLayout.setPadding(dp16, dp16, dp16, dp16);
+
+        TextView tvPTitle = new TextView(requireContext());
+        tvPTitle.setText("Configuring Databases...");
+        tvPTitle.setTextColor(Color.parseColor("#00E5FF"));
+        tvPTitle.setTextSize(TypedValue.COMPLEX_UNIT_SP, 14);
+        tvPTitle.setTypeface(Typeface.DEFAULT_BOLD);
+        pLayout.addView(tvPTitle);
+
+        final ProgressBar pBar = new ProgressBar(requireContext(), null, android.R.attr.progressBarStyleHorizontal);
+        pBar.setMax(100);
+        pBar.setProgress(5);
+        LinearLayout.LayoutParams barLp = new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT, dpToPx(8));
+        barLp.setMargins(0, dp16, 0, dp8);
+        pBar.setLayoutParams(barLp);
+        pLayout.addView(pBar);
+
+        final TextView tvPStatus = new TextView(requireContext());
+        tvPStatus.setText("Starting installation...");
+        tvPStatus.setTextColor(Color.WHITE);
+        tvPStatus.setTextSize(TypedValue.COMPLEX_UNIT_SP, 11);
+        pLayout.addView(tvPStatus);
+
+        final TextView tvPTime = new TextView(requireContext());
+        tvPTime.setText("⏱ Estimating time...");
+        tvPTime.setTextColor(Color.parseColor("#888888"));
+        tvPTime.setTextSize(TypedValue.COMPLEX_UNIT_SP, 10);
+        tvPTime.setPadding(0, dpToPx(4), 0, 0);
+        pLayout.addView(tvPTime);
+
+        final AlertDialog pDialog = new AlertDialog.Builder(requireContext())
+                .setCancelable(false)
+                .setView(pLayout)
+                .create();
+        pDialog.show();
+
+        com.mysql.pocketsql.engine.SqlApiHelper.DatabaseSetupListener setupListener = new com.mysql.pocketsql.engine.SqlApiHelper.DatabaseSetupListener() {
+            @Override
+            public void onSetupProgress(String currentDb, int currentDbIndex, int totalDbs, int progressPercent, String statusMessage, int estimatedSecondsRemaining) {
+                com.mysql.pocketsql.engine.SqlThreadScheduler.runOnMainThread(() -> {
+                    if (pBar != null) pBar.setProgress(progressPercent);
+                    if (tvPStatus != null && statusMessage != null) tvPStatus.setText(statusMessage);
+                    if (tvPTime != null) {
+                        tvPTime.setText(estimatedSecondsRemaining > 0 ? "⏱ ~" + estimatedSecondsRemaining + "s remaining" : "⏱ Finalizing...");
+                    }
+                });
+            }
+
+            @Override
+            public void onSetupCompleted() {
+                com.mysql.pocketsql.engine.SqlThreadScheduler.runOnMainThread(() -> {
+                    com.mysql.pocketsql.engine.SqlApiHelper.removeSetupListener(this);
+                    try {
+                        if (pDialog.isShowing()) {
+                            pDialog.dismiss();
+                        }
+                    } catch (Exception ignored) {}
+
+                    Toast.makeText(requireContext(), "Database configuration complete!", Toast.LENGTH_SHORT).show();
+                    refreshTerminalPrompt();
+                    if (onCompleted != null) {
+                        onCompleted.run();
+                    }
+                });
+            }
+        };
+
+        com.mysql.pocketsql.engine.SqlApiHelper.initializeSelectedDatabases(dbsToInstall, forceReload, setupListener);
     }
 }

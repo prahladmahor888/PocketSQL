@@ -14,6 +14,7 @@ public class SqlApiHelper {
     private static DatabaseEngine engine;
     private static SqlApiKeyManager apiKeyManager;
     private static SqlApiServer apiServer;
+    private static SqlTunnelManager tunnelManager;
     private static volatile boolean isDefaultDbReady = false;
     private static volatile boolean isAllDatabasesReady = false;
 
@@ -55,7 +56,7 @@ public class SqlApiHelper {
         if (isAllDatabasesReady) return true;
         if (engine != null) {
             try {
-                String activeDb = SqlEnvConfig.getDefaultActiveDb();
+                String activeDb = (context != null) ? new com.mysql.pocketsql.SettingsManager(context).getDefaultDatabase() : SqlEnvConfig.getDefaultActiveDb();
                 if (engine.getStorageEngine() != null && engine.getStorageEngine().databaseExists(activeDb)) {
                     isAllDatabasesReady = true;
                     isDefaultDbReady = true;
@@ -99,13 +100,14 @@ public class SqlApiHelper {
             apiKeyManager = new SqlApiKeyManager(pocketsqlDir);
             apiKeyManager.initializeDefaultKey();
             apiServer = new SqlApiServer(engine, apiKeyManager);
+            tunnelManager = new SqlTunnelManager(context, apiServer);
 
             if (!engine.hasUsersConfigured()) {
                 engine.initializeDefaultRootUser();
             }
 
             // Check if active database exists on disk already
-            String activeDb = SqlEnvConfig.getDefaultActiveDb();
+            String activeDb = (context != null) ? new com.mysql.pocketsql.SettingsManager(context).getDefaultDatabase() : SqlEnvConfig.getDefaultActiveDb();
             if (engine.getStorageEngine() != null && engine.getStorageEngine().databaseExists(activeDb)) {
                 try {
                     engine.useDatabase(activeDb);
@@ -156,6 +158,10 @@ public class SqlApiHelper {
      * Guaranteed to install the default active database ('ecommerce') even if omitted.
      */
     public static void initializeSelectedDatabases(List<String> selectedDatabases, DatabaseSetupListener customListener) {
+        initializeSelectedDatabases(selectedDatabases, false, customListener);
+    }
+
+    public static void initializeSelectedDatabases(List<String> selectedDatabases, boolean forceReload, DatabaseSetupListener customListener) {
         if (customListener != null) {
             addSetupListener(customListener);
         }
@@ -169,17 +175,19 @@ public class SqlApiHelper {
             }
         }
 
-        final String defaultActiveDb = SqlEnvConfig.getDefaultActiveDb();
-        // Mandatory default database
-        if (!toLoad.contains(defaultActiveDb)) {
-            toLoad.add(0, defaultActiveDb);
+        final String defaultActiveDb = (context != null) 
+                ? new com.mysql.pocketsql.SettingsManager(context).getDefaultDatabase() 
+                : SqlEnvConfig.getDefaultActiveDb();
+
+        if (toLoad.isEmpty()) {
+            toLoad.add(defaultActiveDb);
         }
 
-        // Filter out already installed databases
+        // Filter out already installed databases unless forceReload is requested
         final List<String> pendingLoad = new ArrayList<>();
         for (String dbName : toLoad) {
             try {
-                if (!engine.getStorageEngine().databaseExists(dbName)) {
+                if (forceReload || !engine.getStorageEngine().databaseExists(dbName)) {
                     pendingLoad.add(dbName);
                 }
             } catch (Exception ignored) {
@@ -232,6 +240,11 @@ public class SqlApiHelper {
                         final float startSeedProgress = startDbProgress + schemaWeight;
                         final int defaultRemainingSec = Math.max(1, (totalDatabases - i) * 3);
 
+                        if (forceReload) {
+                            try {
+                                engine.execute("DROP DATABASE IF EXISTS " + dbName + ";");
+                            } catch (Exception ignored) {}
+                        }
                         final float[] currentScriptProgress = new float[]{0.0f};
 
                         notifyProgress(
@@ -379,6 +392,10 @@ public class SqlApiHelper {
 
     public static SqlApiServer getApiServer() {
         return apiServer;
+    }
+
+    public static SqlTunnelManager getTunnelManager() {
+        return tunnelManager;
     }
 
     public static String getNetworkHostAddress() {
