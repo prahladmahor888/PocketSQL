@@ -1,5 +1,10 @@
 #!/bin/bash
 
+# PocketSQL Remote Connection URL:
+# 1. Local device:            "http://localhost:8080/api/query"
+# 2. Local Wi-Fi (LAN):       "http://192.168.1.15:8080/api/query"
+# 3. Global Public Tunnel:    "https://<subdomain>.loca.lt/api/query"
+# 4. Custom Domain / Server:  "https://api.yourcustomdomain.com/api/query"
 BASE_URL="http://<mobile_ip>:<active_port>/api/query"
 API_KEY="<your_api_key>"
 DATABASE="ecommerce"
@@ -27,6 +32,7 @@ run_sql() {
     response=$(curl -s -X POST "$BASE_URL" \
         -H "Authorization: Bearer $API_KEY" \
         -H "Content-Type: application/json" \
+        -H "Bypass-Tunnel-Reminder: true" \
         -d "{\"sql\": \"$escaped_sql\", \"database\": \"$DATABASE\"}")
 
     if [ $? -ne 0 ]; then

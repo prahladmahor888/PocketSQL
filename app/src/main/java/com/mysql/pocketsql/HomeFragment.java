@@ -13,7 +13,6 @@ import android.text.SpannableStringBuilder;
 import android.widget.ProgressBar;
 import android.widget.Toast;
 import android.text.style.ForegroundColorSpan;
-import android.text.style.ScaleXSpan;
 import android.util.TypedValue;
 import android.view.LayoutInflater;
 import android.view.View;
@@ -30,13 +29,7 @@ import android.widget.Spinner;
 import android.widget.ArrayAdapter;
 import android.widget.TextView;
 import android.text.Editable;
-import android.database.Cursor;
-import android.provider.OpenableColumns;
-import java.io.InputStream;
-import java.io.FileOutputStream;
-import java.io.OutputStream;
 import org.json.JSONObject;
-import org.json.JSONArray;
 
 import androidx.annotation.NonNull;
 import androidx.annotation.Nullable;
@@ -47,8 +40,6 @@ import androidx.fragment.app.Fragment;
 
 import com.mysql.pocketsql.engine.DatabaseEngine;
 import com.mysql.pocketsql.engine.QueryResult;
-import com.mysql.pocketsql.engine.SqlScriptRunner;
-import com.mysql.pocketsql.BuildConfig;
 
 import java.io.File;
 import java.util.ArrayList;
@@ -1143,7 +1134,8 @@ public class HomeFragment extends Fragment {
         dialog.setOnDismissListener(d -> showKeyboard());
 
         // Refresh/repopulate logic helper
-        final Runnable[] repopulate = new Runnable[1];
+        final Runnable[] repopulate = new Runnable[1];
+
         repopulate[0] = new Runnable() {
             @Override
             public void run() {
@@ -3990,7 +3982,8 @@ public class HomeFragment extends Fragment {
                 new SampleDbModel("social", "👥 Social Network", "User profiles, posts, comments, likes, hashtags & followers.")
         };
 
-        final Runnable[] repopulate = new Runnable[1];
+        final Runnable[] repopulate = new Runnable[1];
+
         repopulate[0] = new Runnable() {
             @Override
             public void run() {

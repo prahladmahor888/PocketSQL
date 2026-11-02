@@ -1,6 +1,5 @@
 package com.mysql.pocketsql.engine;
 
-import org.json.JSONObject;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.Set;
